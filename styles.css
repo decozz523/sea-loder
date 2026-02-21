@@ -1,0 +1,39 @@
+:root {
+  color-scheme: dark;
+  font-family: Inter, Segoe UI, Roboto, sans-serif;
+}
+
+body {
+  margin: 0;
+  background: radial-gradient(circle at top, #16365c, #06131f 70%);
+  color: #e8f1fb;
+}
+
+.layout {
+  width: min(1000px, 94vw);
+  margin: 20px auto;
+}
+
+h1 {
+  margin: 0;
+  font-size: 1.7rem;
+}
+
+p {
+  opacity: 0.9;
+  line-height: 1.35;
+}
+
+.game-wrap {
+  border: 1px solid #33587e;
+  border-radius: 12px;
+  overflow: hidden;
+  box-shadow: 0 15px 40px rgba(0, 0, 0, 0.35);
+}
+
+canvas {
+  display: block;
+  width: 100%;
+  height: auto;
+  background: #0c2d4f;
+}
