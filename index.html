@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Sea Loder — Lake Scene</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        font-family: Inter, system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+      }
+
+      body {
+        margin: 0;
+        min-height: 100vh;
+        display: grid;
+        place-items: center;
+        background: radial-gradient(circle at 20% 20%, #1b3456, #0f1f33);
+      }
+
+      #game-container {
+        width: min(960px, 95vw);
+      }
+
+      canvas {
+        width: 100%;
+        height: auto;
+        border: 2px solid #9dd5ff;
+        border-radius: 10px;
+        box-shadow: 0 12px 30px rgba(0, 0, 0, 0.45);
+        background: #164e79;
+      }
+
+      .hint {
+        margin-top: 10px;
+        color: #d7ecff;
+        text-align: center;
+        font-size: 0.95rem;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="game-container">
+      <canvas id="game" width="960" height="540" aria-label="Lake game canvas"></canvas>
+      <p class="hint">Управление: WASD / стрелки</p>
+    </div>
+    <script type="module" src="./src/main.js"></script>
+  </body>
+</html>
