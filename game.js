@@ -2,477 +2,596 @@ const canvas = document.getElementById("game");
 const ctx = canvas.getContext("2d");
 
 const world = {
-  width: canvas.width,
-  height: canvas.height,
-  tilt: 0.6,
+  width: 2400,
+  height: 1800,
 };
 
 const keys = new Set();
-const pressed = new Set();
 
-const state = {
-  cash: 60,
-  fish: 0,
-  hp: 100,
-  maxHp: 100,
-  boat: {
-    x: 180,
-    y: 330,
-    vx: 0,
-    vy: 0,
-    baseSpeed: 115,
-    speedLevel: 0,
-    hullLevel: 0,
-    rodLevel: 0,
-    storageLevel: 0,
-    storageBase: 6,
-  },
-  threats: [],
-  msg: "Отправляйся в рыболовную зону.",
-  msgTimer: 5,
-  dangerFlash: 0,
-  fishCooldown: 0,
-  fishingProgress: 0,
-  shopOpen: false,
-  gameOver: false,
-};
-
-const zones = {
-  shop: { x: 70, y: 270, w: 170, h: 160, title: "Причал / магазин" },
-  fishing: { x: 540, y: 130, w: 320, h: 260, title: "Зона ловли" },
-};
-
-const upgrades = [
-  {
-    key: "speedLevel",
-    name: "Двигатель",
-    baseCost: 45,
-    max: 5,
-    desc: "+10% к скорости лодки",
-    apply: () => {},
-  },
-  {
-    key: "hullLevel",
-    name: "Корпус",
-    baseCost: 55,
-    max: 5,
-    desc: "+18 макс. прочности",
-    apply: () => {
-      state.maxHp = 100 + state.boat.hullLevel * 18;
-      state.hp = Math.min(state.maxHp, state.hp + 14);
-    },
-  },
-  {
-    key: "rodLevel",
-    name: "Снасти",
-    baseCost: 40,
-    max: 5,
-    desc: "Быстрее и выгоднее ловля",
-    apply: () => {},
-  },
-  {
-    key: "storageLevel",
-    name: "Трюм",
-    baseCost: 35,
-    max: 5,
-    desc: "+2 к вместимости",
-    apply: () => {},
-  },
+const islands = [
+  { id: "base", x: 260, y: 1450, r: 140, type: "base", name: "База" },
+  { id: "i1", x: 740, y: 1260, r: 110, type: "resource", name: "Мшистый" },
+  { id: "i2", x: 990, y: 420, r: 125, type: "enemy", name: "Пиратский" },
+  { id: "i3", x: 1540, y: 640, r: 90, type: "resource", name: "Каменный" },
+  { id: "i4", x: 1650, y: 1220, r: 145, type: "enemy", name: "Чёрный риф" },
+  { id: "i5", x: 2100, y: 420, r: 85, type: "unique", name: "Осколок" },
+  { id: "i6", x: 2080, y: 980, r: 130, type: "resource", name: "Пальмовый" },
+  { id: "i7", x: 1230, y: 1560, r: 105, type: "unique", name: "Обелиск" },
 ];
 
-function storageLimit() {
-  return state.boat.storageBase + state.boat.storageLevel * 2;
+const resources = [];
+const enemies = [];
+
+function islandById(id) {
+  return islands.find((i) => i.id === id);
 }
 
-function speedMultiplier() {
-  return 1 + state.boat.speedLevel * 0.1;
-}
-
-function rodMultiplier() {
-  return 1 + state.boat.rodLevel * 0.18;
-}
-
-function notify(text, seconds = 2.2) {
-  state.msg = text;
-  state.msgTimer = seconds;
-}
-
-function addThreats() {
-  const safe = zones.shop;
-  for (let i = 0; i < 3; i += 1) {
-    state.threats.push({
-      kind: "log",
-      x: 360 + Math.random() * 500,
-      y: 80 + Math.random() * 380,
-      vx: (Math.random() > 0.5 ? 1 : -1) * (30 + Math.random() * 40),
-      vy: (Math.random() > 0.5 ? 1 : -1) * (20 + Math.random() * 35),
-      r: 18,
+for (const island of islands) {
+  const count = island.type === "resource" ? 5 : island.type === "unique" ? 3 : 2;
+  for (let i = 0; i < count; i += 1) {
+    const a = Math.random() * Math.PI * 2;
+    const d = 24 + Math.random() * (island.r - 34);
+    resources.push({
+      islandId: island.id,
+      x: island.x + Math.cos(a) * d,
+      y: island.y + Math.sin(a) * d,
+      kind: island.type === "unique" ? "artifact" : Math.random() > 0.55 ? "metal" : "wood",
+      taken: false,
     });
   }
-  for (let i = 0; i < 2; i += 1) {
-    state.threats.push({
-      kind: "whirlpool",
-      x: safe.x + safe.w + 130 + Math.random() * 450,
-      y: 90 + Math.random() * 380,
-      strength: 26 + Math.random() * 12,
-      r: 32,
-    });
+
+  if (island.type === "enemy") {
+    for (let i = 0; i < 3; i += 1) {
+      const a = Math.random() * Math.PI * 2;
+      const d = 18 + Math.random() * (island.r - 44);
+      enemies.push({
+        islandId: island.id,
+        x: island.x + Math.cos(a) * d,
+        y: island.y + Math.sin(a) * d,
+        dir: Math.random() * Math.PI * 2,
+      });
+    }
   }
-  state.threats.push({
-    kind: "storm",
-    x: 430,
-    y: 55,
-    w: 240,
-    h: 140,
-    pulse: 0,
-  });
 }
 
-function inZone(z, x = state.boat.x, y = state.boat.y) {
-  return x > z.x && x < z.x + z.w && y > z.y && y < z.y + z.h;
+const state = {
+  discovered: new Set(["base"]),
+  visited: new Set(["base"]),
+  mode: "ship",
+  activeIslandId: "base",
+  ship: {
+    x: 360,
+    y: 1420,
+    angle: -0.4,
+    speed: 0,
+    hp: 100,
+    maxHp: 100,
+    speedLevel: 0,
+    hullLevel: 0,
+    cargoLevel: 0,
+  },
+  player: {
+    x: 260,
+    y: 1450,
+    hp: 100,
+    maxHp: 100,
+  },
+  inventory: {
+    wood: 0,
+    metal: 0,
+    artifact: 0,
+  },
+  note: "Отплывайте от базы и открывайте острова.",
+  noteTimer: 6,
+  hitFlash: 0,
+};
+
+function shipMaxSpeed() {
+  return 110 + state.ship.speedLevel * 28;
 }
 
-function handleShopAction() {
-  if (!inZone(zones.shop)) return;
+function cargoMax() {
+  return 12 + state.ship.cargoLevel * 6;
+}
 
-  if (state.fish > 0) {
-    const gain = Math.round(state.fish * (18 + state.boat.rodLevel * 5));
-    state.cash += gain;
-    notify(`Продано рыбы: +${gain} монет.`);
-    state.fish = 0;
+function cargoUsed() {
+  return state.inventory.wood + state.inventory.metal + state.inventory.artifact;
+}
+
+function setNote(text, ttl = 2.6) {
+  state.note = text;
+  state.noteTimer = ttl;
+}
+
+function getNearIsland(x, y, extra = 0) {
+  for (const island of islands) {
+    if (Math.hypot(x - island.x, y - island.y) <= island.r + extra) return island;
+  }
+  return null;
+}
+
+function updateDiscovery() {
+  const sx = state.ship.x;
+  const sy = state.ship.y;
+  for (const island of islands) {
+    const d = Math.hypot(sx - island.x, sy - island.y);
+    if (d < 350) state.discovered.add(island.id);
+    if (d < island.r + 95) state.visited.add(island.id);
+  }
+}
+
+function dockAndRepair() {
+  if (state.activeIslandId !== "base") return;
+  const missing = state.ship.maxHp - state.ship.hp;
+  if (missing <= 0) {
+    setNote("Корпус в идеальном состоянии.");
+    return;
+  }
+  const cost = Math.ceil(missing * 0.6);
+  const available = state.inventory.wood + state.inventory.metal;
+  if (available < cost) {
+    setNote(`Не хватает ресурсов для ремонта (${cost}).`);
+    return;
+  }
+  let left = cost;
+  while (left > 0 && state.inventory.wood > 0) {
+    state.inventory.wood -= 1;
+    left -= 1;
+  }
+  while (left > 0 && state.inventory.metal > 0) {
+    state.inventory.metal -= 1;
+    left -= 1;
+  }
+  state.ship.hp = state.ship.maxHp;
+  setNote("Корабль отремонтирован на базе.");
+}
+
+function tryUpgrade(slot) {
+  if (state.mode !== "ship" || state.activeIslandId !== "base") return;
+
+  const options = {
+    1: { key: "speedLevel", max: 4, w: 6, m: 5, a: 0, name: "Скорость" },
+    2: { key: "hullLevel", max: 4, w: 4, m: 8, a: 0, name: "Прочность" },
+    3: { key: "cargoLevel", max: 4, w: 8, m: 2, a: 1, name: "Трюм" },
+  };
+  const up = options[slot];
+  if (!up) return;
+
+  if (state.ship[up.key] >= up.max) {
+    setNote(`${up.name} уже максимально улучшена.`);
     return;
   }
 
-  for (const up of upgrades) {
-    const level = state.boat[up.key];
-    if (level >= up.max) continue;
-    const price = up.baseCost + level * 30;
-    if (state.cash >= price) {
-      state.cash -= price;
-      state.boat[up.key] += 1;
-      up.apply();
-      notify(`${up.name} улучшен до ${state.boat[up.key]} уровня.`);
+  const scale = state.ship[up.key] + 1;
+  const costW = up.w * scale;
+  const costM = up.m * scale;
+  const costA = up.a * scale;
+
+  if (
+    state.inventory.wood < costW ||
+    state.inventory.metal < costM ||
+    state.inventory.artifact < costA
+  ) {
+    setNote(`Нужно: дерево ${costW}, металл ${costM}, артефакты ${costA}.`);
+    return;
+  }
+
+  state.inventory.wood -= costW;
+  state.inventory.metal -= costM;
+  state.inventory.artifact -= costA;
+  state.ship[up.key] += 1;
+
+  if (up.key === "hullLevel") {
+    state.ship.maxHp = 100 + state.ship.hullLevel * 35;
+    state.ship.hp = Math.min(state.ship.maxHp, state.ship.hp + 25);
+  }
+
+  setNote(`${up.name} улучшена до ${state.ship[up.key]} ур.`);
+}
+
+function tryLandOrBoard() {
+  if (state.mode === "ship") {
+    if (Math.abs(state.ship.speed) > 18) {
+      setNote("Сначала почти полностью остановите корабль.");
       return;
+    }
+    const island = getNearIsland(state.ship.x, state.ship.y, 22);
+    if (!island) {
+      setNote("Подплывите к острову, чтобы высадиться.");
+      return;
+    }
+    state.mode = "foot";
+    state.activeIslandId = island.id;
+    state.player.x = island.x;
+    state.player.y = island.y;
+    state.visited.add(island.id);
+    setNote(`Высадка: ${island.name}.`);
+  } else {
+    if (!state.activeIslandId) return;
+    const island = islandById(state.activeIslandId);
+    const d = Math.hypot(state.player.x - state.ship.x, state.player.y - state.ship.y);
+    if (d > island.r + 42) {
+      setNote("Вернитесь ближе к месту высадки (к кораблю).");
+      return;
+    }
+    state.mode = "ship";
+    state.player.hp = state.player.maxHp;
+    if (state.activeIslandId === "base") dockAndRepair();
+    setNote("Возвращение на корабль.");
+  }
+}
+
+function gatherNearestResource() {
+  if (state.mode !== "foot") return;
+  const island = islandById(state.activeIslandId);
+  let nearest = null;
+  let best = Infinity;
+  for (const res of resources) {
+    if (res.taken || res.islandId !== island.id) continue;
+    const d = Math.hypot(res.x - state.player.x, res.y - state.player.y);
+    if (d < best) {
+      best = d;
+      nearest = res;
     }
   }
 
-  notify("Недостаточно денег или всё улучшено.");
+  if (!nearest || best > 28) {
+    setNote("Нет ресурса рядом для взаимодействия.");
+    return;
+  }
+
+  if (cargoUsed() >= cargoMax()) {
+    setNote("Трюм заполнен. Вернитесь на корабль.");
+    return;
+  }
+
+  nearest.taken = true;
+  state.inventory[nearest.kind] += 1;
+  setNote(`Получено: ${nearest.kind}.`);
 }
 
-function handleFishingAction() {
-  if (!inZone(zones.fishing)) {
-    notify("Ловить можно только в рыболовной зоне.");
-    return;
-  }
+function handleShip(dt) {
+  const turnRate = 2.2;
+  const accel = 125;
+  const reverse = 70;
+  const drag = 0.97;
 
-  if (state.fish >= storageLimit()) {
-    notify("Трюм полон! Вернись на причал.");
-    return;
-  }
+  if (keys.has("a") || keys.has("arrowleft")) state.ship.angle -= turnRate * dt;
+  if (keys.has("d") || keys.has("arrowright")) state.ship.angle += turnRate * dt;
+  if (keys.has("w") || keys.has("arrowup")) state.ship.speed += accel * dt;
+  if (keys.has("s") || keys.has("arrowdown")) state.ship.speed -= reverse * dt;
 
-  if (state.fishCooldown > 0) return;
-  state.fishingProgress = 0.3;
-  const chance = 0.6 + state.boat.rodLevel * 0.08;
-  const caught = Math.random() < chance ? 1 : 0;
-  if (caught) {
-    state.fish += 1;
-    notify("Поймал рыбу!", 1.4);
+  const maxFwd = shipMaxSpeed();
+  state.ship.speed = Math.max(-50, Math.min(maxFwd, state.ship.speed));
+  state.ship.speed *= drag;
+
+  const nx = state.ship.x + Math.cos(state.ship.angle) * state.ship.speed * dt;
+  const ny = state.ship.y + Math.sin(state.ship.angle) * state.ship.speed * dt;
+
+  const hitIsland = getNearIsland(nx, ny, -8);
+  if (hitIsland) {
+    state.ship.speed *= -0.28;
+    state.ship.hp -= 14 * dt;
+    state.hitFlash = 1;
   } else {
-    notify("Рыба сорвалась.", 1.2);
+    state.ship.x = Math.max(30, Math.min(world.width - 30, nx));
+    state.ship.y = Math.max(30, Math.min(world.height - 30, ny));
   }
-  state.fishCooldown = 0.65 / rodMultiplier();
+
+  if (state.ship.x <= 34 || state.ship.x >= world.width - 34 || state.ship.y <= 34 || state.ship.y >= world.height - 34) {
+    state.ship.speed *= -0.35;
+  }
+
+  if (state.ship.hp <= 0) {
+    state.ship.hp = state.ship.maxHp;
+    state.ship.x = 340;
+    state.ship.y = 1420;
+    state.ship.speed = 0;
+    state.inventory.wood = Math.max(0, state.inventory.wood - 4);
+    state.inventory.metal = Math.max(0, state.inventory.metal - 4);
+    setNote("Корабль затонул и восстановлен на базе. Потеря ресурсов.", 4.2);
+  }
+
+  updateDiscovery();
 }
 
-function respawn() {
-  state.boat.x = 170;
-  state.boat.y = 330;
-  state.boat.vx = 0;
-  state.boat.vy = 0;
-  const penalty = Math.min(state.cash, 35);
-  state.cash -= penalty;
-  state.fish = Math.max(0, state.fish - 2);
-  state.hp = state.maxHp;
-  state.gameOver = false;
-  notify(`Лодка восстановлена. Штраф ${penalty} монет.`);
+function handleFoot(dt) {
+  const island = islandById(state.activeIslandId);
+  let mx = 0;
+  let my = 0;
+
+  if (keys.has("a") || keys.has("arrowleft")) mx -= 1;
+  if (keys.has("d") || keys.has("arrowright")) mx += 1;
+  if (keys.has("w") || keys.has("arrowup")) my -= 1;
+  if (keys.has("s") || keys.has("arrowdown")) my += 1;
+
+  const len = Math.hypot(mx, my) || 1;
+  mx /= len;
+  my /= len;
+
+  const speed = 130;
+  state.player.x += mx * speed * dt;
+  state.player.y += my * speed * dt;
+
+  const dToCenter = Math.hypot(state.player.x - island.x, state.player.y - island.y);
+  if (dToCenter > island.r - 8) {
+    const ang = Math.atan2(state.player.y - island.y, state.player.x - island.x);
+    state.player.x = island.x + Math.cos(ang) * (island.r - 8);
+    state.player.y = island.y + Math.sin(ang) * (island.r - 8);
+  }
+
+  for (const e of enemies) {
+    if (e.islandId !== island.id) continue;
+    e.dir += (Math.random() - 0.5) * dt * 2;
+    e.x += Math.cos(e.dir) * 42 * dt;
+    e.y += Math.sin(e.dir) * 42 * dt;
+
+    const fromCenter = Math.hypot(e.x - island.x, e.y - island.y);
+    if (fromCenter > island.r - 14) {
+      const ang = Math.atan2(e.y - island.y, e.x - island.x);
+      e.x = island.x + Math.cos(ang) * (island.r - 14);
+      e.y = island.y + Math.sin(ang) * (island.r - 14);
+      e.dir += Math.PI * 0.7;
+    }
+
+    if (Math.hypot(e.x - state.player.x, e.y - state.player.y) < 18) {
+      state.player.hp -= 26 * dt;
+      state.hitFlash = 1;
+    }
+  }
+
+  if (state.player.hp <= 0) {
+    state.player.hp = state.player.maxHp;
+    state.player.x = island.x;
+    state.player.y = island.y;
+    state.inventory.wood = Math.max(0, state.inventory.wood - 1);
+    state.inventory.metal = Math.max(0, state.inventory.metal - 1);
+    setNote("Вы ранены и потеряли часть ресурсов.");
+  }
 }
 
 function update(dt) {
-  if (state.msgTimer > 0) state.msgTimer -= dt;
-  state.dangerFlash = Math.max(0, state.dangerFlash - dt * 1.5);
-  state.fishCooldown = Math.max(0, state.fishCooldown - dt);
-  state.fishingProgress = Math.max(0, state.fishingProgress - dt * 1.3);
+  if (state.noteTimer > 0) state.noteTimer -= dt;
+  state.hitFlash = Math.max(0, state.hitFlash - dt * 2.4);
 
-  if (state.gameOver) return;
+  if (state.mode === "ship") handleShip(dt);
+  else handleFoot(dt);
+}
 
-  const b = state.boat;
-  const accel = 260 * speedMultiplier();
+function cameraTarget() {
+  return state.mode === "ship"
+    ? { x: state.ship.x, y: state.ship.y }
+    : { x: state.player.x, y: state.player.y };
+}
 
-  let ix = 0;
-  let iy = 0;
+function cameraOffset() {
+  const target = cameraTarget();
+  const ox = Math.max(0, Math.min(world.width - canvas.width, target.x - canvas.width / 2));
+  const oy = Math.max(0, Math.min(world.height - canvas.height, target.y - canvas.height / 2));
+  return { x: ox, y: oy };
+}
 
-  if (keys.has("ArrowLeft") || keys.has("a") || keys.has("A")) ix -= 1;
-  if (keys.has("ArrowRight") || keys.has("d") || keys.has("D")) ix += 1;
-  if (keys.has("ArrowUp") || keys.has("w") || keys.has("W")) iy -= 1;
-  if (keys.has("ArrowDown") || keys.has("s") || keys.has("S")) iy += 1;
+function drawOcean(cam) {
+  const grad = ctx.createLinearGradient(0, 0, 0, canvas.height);
+  grad.addColorStop(0, "#347eb5");
+  grad.addColorStop(1, "#0f3558");
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-  const len = Math.hypot(ix, iy) || 1;
-  ix /= len;
-  iy /= len;
+  ctx.save();
+  ctx.globalAlpha = 0.14;
+  ctx.strokeStyle = "#d8f1ff";
+  for (let x = -((cam.x % 120) + 120); x < canvas.width + 120; x += 120) {
+    ctx.beginPath();
+    ctx.moveTo(x, 0);
+    ctx.lineTo(x + 70, canvas.height);
+    ctx.stroke();
+  }
+  ctx.restore();
+}
 
-  b.vx += ix * accel * dt;
-  b.vy += iy * accel * dt;
+function islandColor(type) {
+  if (type === "base") return "#c7a97c";
+  if (type === "enemy") return "#8f5f50";
+  if (type === "unique") return "#8886ab";
+  return "#79a86f";
+}
 
-  const maxSpeed = b.baseSpeed * speedMultiplier();
-  const spd = Math.hypot(b.vx, b.vy);
-  if (spd > maxSpeed) {
-    b.vx = (b.vx / spd) * maxSpeed;
-    b.vy = (b.vy / spd) * maxSpeed;
+function drawWorld(cam) {
+  for (const island of islands) {
+    if (!state.discovered.has(island.id)) continue;
+    const sx = island.x - cam.x;
+    const sy = island.y - cam.y;
+
+    ctx.fillStyle = islandColor(island.type);
+    ctx.beginPath();
+    ctx.ellipse(sx, sy, island.r, island.r * 0.84, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.fillStyle = "rgba(0,0,0,0.2)";
+    ctx.beginPath();
+    ctx.ellipse(sx, sy + island.r * 0.2, island.r * 0.85, island.r * 0.28, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.fillStyle = "#f1f3f6";
+    ctx.font = "12px sans-serif";
+    ctx.fillText(island.name, sx - island.r * 0.4, sy - island.r - 8);
   }
 
-  b.vx *= 0.91;
-  b.vy *= 0.91;
+  for (const res of resources) {
+    if (res.taken) continue;
+    if (!state.discovered.has(res.islandId)) continue;
+    const sx = res.x - cam.x;
+    const sy = res.y - cam.y;
+    ctx.fillStyle = res.kind === "wood" ? "#6e4c31" : res.kind === "metal" ? "#9aa0a8" : "#d9c17a";
+    ctx.beginPath();
+    ctx.arc(sx, sy, 6, 0, Math.PI * 2);
+    ctx.fill();
+  }
 
-  for (const t of state.threats) {
-    if (t.kind === "log") {
-      t.x += t.vx * dt;
-      t.y += t.vy * dt;
-      if (t.x < 280 || t.x > world.width - 30) t.vx *= -1;
-      if (t.y < 45 || t.y > world.height - 40) t.vy *= -1;
+  for (const e of enemies) {
+    if (!state.discovered.has(e.islandId)) continue;
+    const sx = e.x - cam.x;
+    const sy = e.y - cam.y;
+    ctx.fillStyle = "#cf5d5d";
+    ctx.beginPath();
+    ctx.arc(sx, sy, 8, 0, Math.PI * 2);
+    ctx.fill();
+  }
 
-      const d = Math.hypot(t.x - b.x, t.y - b.y);
-      if (d < t.r + 12) {
-        b.vx += (b.x - t.x) * 2.5 * dt;
-        b.vy += (b.y - t.y) * 2.5 * dt;
-        state.hp -= 12 * dt;
-        state.dangerFlash = 1;
+  if (state.mode === "ship") {
+    const sx = state.ship.x - cam.x;
+    const sy = state.ship.y - cam.y;
+    ctx.save();
+    ctx.translate(sx, sy);
+    ctx.rotate(state.ship.angle);
+    ctx.fillStyle = "#f2f2ec";
+    ctx.beginPath();
+    ctx.moveTo(16, 0);
+    ctx.lineTo(-12, -8);
+    ctx.lineTo(-8, 0);
+    ctx.lineTo(-12, 8);
+    ctx.closePath();
+    ctx.fill();
+    ctx.fillStyle = "#f4c061";
+    ctx.fillRect(-2, -12, 3, 10);
+    ctx.restore();
+  } else {
+    const ssx = state.ship.x - cam.x;
+    const ssy = state.ship.y - cam.y;
+    ctx.fillStyle = "#e9f1f7";
+    ctx.beginPath();
+    ctx.arc(ssx, ssy, 12, 0, Math.PI * 2);
+    ctx.fill();
+
+    const px = state.player.x - cam.x;
+    const py = state.player.y - cam.y;
+    ctx.fillStyle = "#f6d4b5";
+    ctx.beginPath();
+    ctx.arc(px, py, 9, 0, Math.PI * 2);
+    ctx.fill();
+
+    let near = null;
+    let best = Infinity;
+    for (const res of resources) {
+      if (res.taken || res.islandId !== state.activeIslandId) continue;
+      const d = Math.hypot(res.x - state.player.x, res.y - state.player.y);
+      if (d < best) {
+        best = d;
+        near = res;
       }
     }
-
-    if (t.kind === "whirlpool") {
-      const dx = t.x - b.x;
-      const dy = t.y - b.y;
-      const d = Math.hypot(dx, dy);
-      if (d < t.r * 2.3) {
-        b.vx += (dx / (d || 1)) * t.strength * dt;
-        b.vy += (dy / (d || 1)) * t.strength * dt;
-        state.hp -= 8 * dt;
-        state.dangerFlash = 0.9;
-      }
-    }
-
-    if (t.kind === "storm") {
-      t.pulse += dt;
-      if (inZone(t, b.x, b.y)) {
-        b.vx *= 0.985;
-        b.vy *= 0.985;
-        state.hp -= (6 + Math.sin(t.pulse * 6) * 2) * dt;
-        state.dangerFlash = 0.8;
-      }
+    if (near && best < 30) {
+      ctx.strokeStyle = "#fff387";
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.arc(near.x - cam.x, near.y - cam.y, 11, 0, Math.PI * 2);
+      ctx.stroke();
     }
   }
 
-  b.x += b.vx * dt;
-  b.y += b.vy * dt;
-
-  b.x = Math.max(25, Math.min(world.width - 25, b.x));
-  b.y = Math.max(35, Math.min(world.height - 25, b.y));
-
-  if (state.hp <= 0) {
-    state.gameOver = true;
-    notify("Лодка уничтожена! Нажми R для восстановления у причала.", 5);
+  ctx.fillStyle = "rgba(4,10,20,0.45)";
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  for (const island of islands) {
+    if (!state.discovered.has(island.id)) continue;
+    ctx.save();
+    ctx.globalCompositeOperation = "destination-out";
+    ctx.beginPath();
+    ctx.arc(island.x - cam.x, island.y - cam.y, island.r + 46, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
   }
 }
 
-function drawTiltedRect(x, y, w, h, color, alpha = 1) {
-  ctx.save();
-  ctx.globalAlpha = alpha;
-  ctx.fillStyle = color;
+function drawUi() {
+  ctx.fillStyle = "rgba(3,13,24,0.7)";
+  ctx.fillRect(10, 10, 430, 146);
+  ctx.fillStyle = "#eef8ff";
+  ctx.font = "15px sans-serif";
+
+  const modeLabel = state.mode === "ship" ? "корабль" : `пешком (${islandById(state.activeIslandId).name})`;
+  ctx.fillText(`Режим: ${modeLabel}`, 20, 32);
+  ctx.fillText(`HP корабля: ${state.ship.hp.toFixed(0)}/${state.ship.maxHp}`, 20, 54);
+  ctx.fillText(`HP персонажа: ${state.player.hp.toFixed(0)}/${state.player.maxHp}`, 20, 76);
+  ctx.fillText(`Ресурсы: дерево ${state.inventory.wood}, металл ${state.inventory.metal}, артефакты ${state.inventory.artifact}`, 20, 98);
+  ctx.fillText(`Трюм: ${cargoUsed()}/${cargoMax()} | Открыто островов: ${state.discovered.size}/${islands.length}`, 20, 120);
+  ctx.fillText(`Улучшения: скорость ${state.ship.speedLevel}, корпус ${state.ship.hullLevel}, трюм ${state.ship.cargoLevel}`, 20, 142);
+
+  if (state.noteTimer > 0) {
+    ctx.fillStyle = "rgba(0,0,0,0.58)";
+    ctx.fillRect(200, canvas.height - 45, 560, 30);
+    ctx.fillStyle = "#f3fbff";
+    ctx.fillText(state.note, 212, canvas.height - 25);
+  }
+
+  const mapW = 220;
+  const mapH = 140;
+  const mapX = canvas.width - mapW - 12;
+  const mapY = 12;
+  ctx.fillStyle = "rgba(2,9,16,0.72)";
+  ctx.fillRect(mapX, mapY, mapW, mapH);
+  ctx.strokeStyle = "#4f7da0";
+  ctx.strokeRect(mapX, mapY, mapW, mapH);
+
+  for (const island of islands) {
+    if (!state.discovered.has(island.id)) continue;
+    const x = mapX + (island.x / world.width) * mapW;
+    const y = mapY + (island.y / world.height) * mapH;
+    ctx.fillStyle = state.visited.has(island.id) ? "#c6f0ff" : "#5a95b6";
+    ctx.beginPath();
+    ctx.arc(x, y, island.type === "base" ? 4 : 3, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  const actor = state.mode === "ship" ? state.ship : state.player;
+  ctx.fillStyle = "#ffd66e";
   ctx.beginPath();
-  ctx.moveTo(x, y);
-  ctx.lineTo(x + w, y + w * 0.06);
-  ctx.lineTo(x + w, y + h + w * 0.06);
-  ctx.lineTo(x, y + h);
-  ctx.closePath();
+  ctx.arc(mapX + (actor.x / world.width) * mapW, mapY + (actor.y / world.height) * mapH, 3, 0, Math.PI * 2);
   ctx.fill();
-  ctx.restore();
+
+  if (state.activeIslandId === "base" && state.mode === "ship") {
+    ctx.fillStyle = "#d9f0ff";
+    ctx.fillText("База: 1-скорость, 2-корпус, 3-трюм, E-ремонт", 468, 28);
+  }
+
+  if (state.hitFlash > 0) {
+    ctx.fillStyle = `rgba(255,60,60,${0.2 * state.hitFlash})`;
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+  }
 }
 
 function render() {
-  ctx.clearRect(0, 0, world.width, world.height);
-
-  const grad = ctx.createLinearGradient(0, 0, 0, world.height);
-  grad.addColorStop(0, "#2f82b8");
-  grad.addColorStop(1, "#1b4f76");
-  ctx.fillStyle = grad;
-  ctx.fillRect(0, 0, world.width, world.height);
-
-  ctx.save();
-  ctx.globalAlpha = 0.11;
-  for (let i = 0; i < 15; i += 1) {
-    ctx.fillStyle = i % 2 ? "#ffffff" : "#9ad1ff";
-    const y = 35 + i * 34;
-    ctx.fillRect(0, y, world.width, 3);
-  }
-  ctx.restore();
-
-  drawTiltedRect(zones.shop.x, zones.shop.y, zones.shop.w, zones.shop.h, "#6d4f2fcc", 0.62);
-  drawTiltedRect(zones.fishing.x, zones.fishing.y, zones.fishing.w, zones.fishing.h, "#2f6b2fcc", 0.5);
-
-  ctx.fillStyle = "#ddc59a";
-  ctx.fillRect(90, 294, 90, 18);
-  ctx.fillRect(95, 322, 120, 10);
-
-  for (const t of state.threats) {
-    if (t.kind === "log") {
-      ctx.save();
-      ctx.translate(t.x, t.y);
-      ctx.rotate(Math.sin((t.x + t.y) * 0.01) * 0.4);
-      ctx.fillStyle = "#7f532f";
-      ctx.fillRect(-22, -7, 44, 14);
-      ctx.restore();
-    }
-
-    if (t.kind === "whirlpool") {
-      for (let i = 0; i < 3; i += 1) {
-        ctx.strokeStyle = `rgba(223,240,255,${0.35 - i * 0.08})`;
-        ctx.lineWidth = 2;
-        ctx.beginPath();
-        ctx.arc(t.x, t.y, t.r - i * 8, 0, Math.PI * 2);
-        ctx.stroke();
-      }
-    }
-
-    if (t.kind === "storm") {
-      drawTiltedRect(t.x, t.y, t.w, t.h, "#7c8598", 0.27);
-      ctx.fillStyle = "rgba(230, 239, 255, 0.2)";
-      for (let i = 0; i < 6; i += 1) {
-        const rx = t.x + 20 + i * 35;
-        const ry = t.y + 20 + Math.sin((performance.now() * 0.004) + i) * 4;
-        ctx.fillRect(rx, ry, 2, 18);
-      }
-    }
-  }
-
-  const b = state.boat;
-  const angle = Math.atan2(b.vy, b.vx);
-  ctx.save();
-  ctx.translate(b.x, b.y);
-  ctx.rotate(angle * 0.35);
-  ctx.scale(1, world.tilt);
-
-  ctx.fillStyle = "#14334f";
-  ctx.beginPath();
-  ctx.ellipse(0, 6, 20, 9, 0, 0, Math.PI * 2);
-  ctx.fill();
-
-  ctx.fillStyle = state.gameOver ? "#662222" : "#efefe8";
-  ctx.beginPath();
-  ctx.moveTo(-17, 0);
-  ctx.lineTo(16, 0);
-  ctx.lineTo(10, 13);
-  ctx.lineTo(-9, 13);
-  ctx.closePath();
-  ctx.fill();
-
-  ctx.fillStyle = "#f7b942";
-  ctx.fillRect(-2, -11, 4, 15);
-  ctx.fillStyle = "#f7e6b2";
-  ctx.beginPath();
-  ctx.moveTo(2, -11);
-  ctx.lineTo(13, -3);
-  ctx.lineTo(2, -1);
-  ctx.closePath();
-  ctx.fill();
-  ctx.restore();
-
-  if (state.dangerFlash > 0) {
-    ctx.fillStyle = `rgba(255,60,60,${0.12 * state.dangerFlash})`;
-    ctx.fillRect(0, 0, world.width, world.height);
-  }
-
-  ctx.fillStyle = "rgba(6,18,33,0.68)";
-  ctx.fillRect(10, 10, 360, 125);
-  ctx.fillStyle = "#eff8ff";
-  ctx.font = "16px sans-serif";
-  ctx.fillText(`Монеты: ${state.cash}`, 20, 34);
-  ctx.fillText(`Рыба: ${state.fish}/${storageLimit()}`, 20, 56);
-  ctx.fillText(`Прочность: ${Math.max(0, state.hp).toFixed(0)}/${state.maxHp}`, 20, 78);
-  ctx.fillText(
-    `Улучшения: Дв ${state.boat.speedLevel} | Корп ${state.boat.hullLevel} | Снаст ${state.boat.rodLevel} | Трюм ${state.boat.storageLevel}`,
-    20,
-    100,
-  );
-
-  if (state.msgTimer > 0) {
-    ctx.fillStyle = "rgba(8, 28, 45, 0.75)";
-    ctx.fillRect(230, world.height - 55, 500, 35);
-    ctx.fillStyle = "#e9f4ff";
-    ctx.fillText(state.msg, 240, world.height - 32);
-  }
-
-  ctx.fillStyle = "#d5ecff";
-  ctx.fillText("Причал-магазин", zones.shop.x + 16, zones.shop.y - 10);
-  ctx.fillText("Рыболовная зона", zones.fishing.x + 20, zones.fishing.y - 10);
-
-  if (inZone(zones.shop)) {
-    ctx.fillStyle = "#fff1d2";
-    ctx.fillText("E: продать рыбу / купить улучшение", 615, 28);
-  }
-  if (inZone(zones.fishing)) {
-    ctx.fillStyle = "#d8ffe2";
-    ctx.fillText("E: попытка ловли", 740, 52);
-  }
-
-  if (state.fishingProgress > 0) {
-    const w = 160;
-    const x = world.width - 190;
-    const y = world.height - 40;
-    ctx.fillStyle = "#04243a";
-    ctx.fillRect(x, y, w, 18);
-    ctx.fillStyle = "#5fdb85";
-    ctx.fillRect(x + 2, y + 2, (w - 4) * state.fishingProgress, 14);
-  }
-
-  if (state.gameOver) {
-    ctx.fillStyle = "rgba(0,0,0,0.55)";
-    ctx.fillRect(0, 0, world.width, world.height);
-    ctx.fillStyle = "#ffe9e9";
-    ctx.font = "bold 28px sans-serif";
-    ctx.fillText("Лодка затонула", 360, 250);
-    ctx.font = "18px sans-serif";
-    ctx.fillText("Нажми R, чтобы восстановиться у причала", 295, 285);
-  }
+  const cam = cameraOffset();
+  drawOcean(cam);
+  drawWorld(cam);
+  drawUi();
 }
 
-document.addEventListener("keydown", (event) => {
-  keys.add(event.key);
-  pressed.add(event.key.toLowerCase());
+document.addEventListener("keydown", (e) => {
+  const k = e.key.toLowerCase();
+  keys.add(k);
 
-  if (event.key.toLowerCase() === "e") {
-    if (inZone(zones.shop)) handleShopAction();
-    else handleFishingAction();
+  if (k === "e") {
+    if (state.mode === "foot") gatherNearestResource();
+    tryLandOrBoard();
   }
 
-  if (event.key.toLowerCase() === "r" && state.gameOver) {
-    respawn();
+  if (k === "1" || k === "2" || k === "3") {
+    tryUpgrade(Number(k));
   }
 });
 
-document.addEventListener("keyup", (event) => {
-  keys.delete(event.key);
-  pressed.delete(event.key.toLowerCase());
+document.addEventListener("keyup", (e) => {
+  keys.delete(e.key.toLowerCase());
 });
 
-addThreats();
-upgrades[1].apply();
-
-let prev = performance.now();
-function loop(now) {
-  const dt = Math.min(0.033, (now - prev) / 1000);
-  prev = now;
+let previous = performance.now();
+function frame(now) {
+  const dt = Math.min(0.033, (now - previous) / 1000);
+  previous = now;
   update(dt);
   render();
-  requestAnimationFrame(loop);
+  requestAnimationFrame(frame);
 }
 
-requestAnimationFrame(loop);
+requestAnimationFrame(frame);
