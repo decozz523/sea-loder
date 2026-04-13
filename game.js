@@ -7,29 +7,52 @@ const world = {
 };
 
 const keys = new Set();
-
-const islands = [
-  { id: "base", x: 900, y: 8300, r: 210, type: "base", name: "База (900,8300)" },
-  { id: "i1", x: 2200, y: 7300, r: 180, type: "resource", name: "Лагуна (2200,7300)" },
-  { id: "i2", x: 3400, y: 5700, r: 220, type: "enemy", name: "Клык (3400,5700)" },
-  { id: "i3", x: 4700, y: 8100, r: 170, type: "resource", name: "Пальмы (4700,8100)" },
-  { id: "i4", x: 6000, y: 6800, r: 200, type: "enemy", name: "Корсар (6000,6800)" },
-  { id: "i5", x: 7200, y: 5000, r: 190, type: "resource", name: "Штиль (7200,5000)" },
-  { id: "i6", x: 8600, y: 7600, r: 230, type: "unique", name: "Монолит (8600,7600)" },
-  { id: "i7", x: 9900, y: 4200, r: 170, type: "resource", name: "Риф (9900,4200)" },
-  { id: "i8", x: 11300, y: 6100, r: 210, type: "enemy", name: "Разлом (11300,6100)" },
-  { id: "i9", x: 12600, y: 3100, r: 150, type: "unique", name: "Обелиск (12600,3100)" },
-];
-
 const resources = [];
 const enemies = [];
+const krakens = [];
+
+function randomRange(min, max) {
+  return min + Math.random() * (max - min);
+}
+
+function createIslands() {
+  const generated = [{ id: "base", x: 900, y: 8300, r: 210, type: "base", name: "База" }];
+  const totalIslands = 11;
+  const typePool = ["resource", "resource", "resource", "enemy", "enemy", "unique"];
+
+  let attempts = 0;
+  while (generated.length < totalIslands && attempts < 1200) {
+    attempts += 1;
+    const r = randomRange(145, 235);
+    const x = randomRange(1200, world.width - 300);
+    const y = randomRange(400, world.height - 300);
+
+    const tooClose = generated.some((island) => Math.hypot(island.x - x, island.y - y) < island.r + r + 480);
+    if (tooClose) continue;
+
+    const type = typePool[Math.floor(Math.random() * typePool.length)];
+    const id = `i${generated.length}`;
+    generated.push({
+      id,
+      x: Math.round(x),
+      y: Math.round(y),
+      r: Math.round(r),
+      type,
+      name: `${type === "unique" ? "Реликт" : type === "enemy" ? "Опасный" : "Дикий"} (${Math.round(x)},${Math.round(y)})`,
+    });
+  }
+
+  return generated;
+}
+
+const islands = createIslands();
 
 function islandById(id) {
   return islands.find((i) => i.id === id);
 }
 
 for (const island of islands) {
-  const count = island.type === "resource" ? 7 : island.type === "unique" ? 4 : 3;
+  const count = island.type === "resource" ? 8 : island.type === "unique" ? 5 : 3;
   for (let i = 0; i < count; i += 1) {
     const a = Math.random() * Math.PI * 2;
     const d = 32 + Math.random() * (island.r - 48);
@@ -83,9 +106,11 @@ const state = {
     metal: 0,
     artifact: 0,
   },
-  note: "Океан огромен: двигайтесь и открывайте острова по координатам.",
+  note: "Океан и острова генерируются рандомно при каждом запуске.",
   noteTimer: 6,
   hitFlash: 0,
+  krakenCooldown: 11,
+  krakenEscapes: 0,
 };
 
 function shipMaxSpeed() {
@@ -119,7 +144,7 @@ function updateDiscovery() {
     const d = Math.hypot(sx - island.x, sy - island.y);
     if (d < 470 && !state.discovered.has(island.id)) {
       state.discovered.add(island.id);
-      setNote(`Обнаружен остров: ${island.name}`, 2.2);
+      setNote(`Обнаружен остров: ${island.name}`, 2.3);
     }
     if (d < island.r + 120) state.visited.add(island.id);
   }
@@ -259,6 +284,94 @@ function gatherNearestResource() {
   setNote(`Собрано: ${nearest.kind}.`);
 }
 
+function spawnKraken() {
+  const angle = Math.random() * Math.PI * 2;
+  const distance = randomRange(500, 760);
+  const x = state.ship.x + Math.cos(angle) * distance;
+  const y = state.ship.y + Math.sin(angle) * distance;
+
+  krakens.push({
+    x,
+    y,
+    vx: randomRange(-25, 25),
+    vy: randomRange(-25, 25),
+    chasing: false,
+    life: randomRange(18, 32),
+    escapeMeter: 0,
+  });
+
+  setNote("⚠ Кракен замечен! Есть шанс убежать на скорости.", 3.6);
+}
+
+function updateKrakens(dt) {
+  if (state.mode !== "ship") return;
+
+  state.krakenCooldown -= dt;
+  if (state.krakenCooldown <= 0) {
+    const spawnChance = 0.18 + Math.min(0.24, state.ship.speed / 250);
+    if (Math.random() < spawnChance) spawnKraken();
+    state.krakenCooldown = randomRange(20, 40);
+  }
+
+  for (let i = krakens.length - 1; i >= 0; i -= 1) {
+    const k = krakens[i];
+    k.life -= dt;
+    if (k.life <= 0) {
+      krakens.splice(i, 1);
+      continue;
+    }
+
+    const dx = state.ship.x - k.x;
+    const dy = state.ship.y - k.y;
+    const d = Math.hypot(dx, dy);
+
+    if (!k.chasing && d < 380) {
+      k.chasing = true;
+      setNote("Кракен атакует корабль! Жми газ и уводи его.", 2.8);
+    }
+
+    if (k.chasing) {
+      k.vx += (dx / (d || 1)) * 95 * dt;
+      k.vy += (dy / (d || 1)) * 95 * dt;
+
+      if (d < 110) {
+        state.ship.hp -= 24 * dt;
+        state.ship.speed *= 0.986;
+        state.hitFlash = 1;
+      }
+
+      if (d > 280 && state.ship.speed > 95) {
+        k.escapeMeter += dt;
+      } else {
+        k.escapeMeter = Math.max(0, k.escapeMeter - dt * 0.6);
+      }
+
+      if (k.escapeMeter > 3.5) {
+        krakens.splice(i, 1);
+        state.krakenEscapes += 1;
+        setNote("Вы ушли от кракена!", 2.2);
+        continue;
+      }
+    }
+
+    const speed = Math.hypot(k.vx, k.vy);
+    const maxSpeed = k.chasing ? 115 : 55;
+    if (speed > maxSpeed) {
+      k.vx = (k.vx / speed) * maxSpeed;
+      k.vy = (k.vy / speed) * maxSpeed;
+    }
+
+    k.x += k.vx * dt;
+    k.y += k.vy * dt;
+    k.vx *= 0.985;
+    k.vy *= 0.985;
+
+    if (Math.hypot(k.x - state.ship.x, k.y - state.ship.y) > 1300) {
+      krakens.splice(i, 1);
+    }
+  }
+}
+
 function handleShip(dt) {
   const turnRate = 2.15;
   const accel = 140;
@@ -286,6 +399,8 @@ function handleShip(dt) {
     state.ship.y = ny;
   }
 
+  updateKrakens(dt);
+
   if (state.ship.hp <= 0) {
     state.ship.hp = state.ship.maxHp;
     state.ship.x = 1180;
@@ -293,7 +408,8 @@ function handleShip(dt) {
     state.ship.speed = 0;
     state.inventory.wood = Math.max(0, state.inventory.wood - 5);
     state.inventory.metal = Math.max(0, state.inventory.metal - 5);
-    setNote("Корабль восстановлен на базе. Часть груза утеряна.", 4.3);
+    krakens.length = 0;
+    setNote("Корабль уничтожен и восстановлен на базе. Груз частично утерян.", 4.3);
   }
 
   updateDiscovery();
@@ -373,19 +489,20 @@ function cameraOffset() {
 
 function drawOcean(cam) {
   const sea = ctx.createLinearGradient(0, 0, 0, canvas.height);
-  sea.addColorStop(0, "#56dcff");
-  sea.addColorStop(0.48, "#25bdf2");
-  sea.addColorStop(1, "#0c87cb");
+  sea.addColorStop(0, "#67e7ff");
+  sea.addColorStop(0.5, "#2ec8f8");
+  sea.addColorStop(1, "#0e8dd0");
   ctx.fillStyle = sea;
   ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-  ctx.save();
-  ctx.globalAlpha = 0.2;
-  ctx.strokeStyle = "#abf6ff";
-  ctx.lineWidth = 1.5;
   const step = 140;
   const ox = ((Math.floor(cam.x) % step) + step) % step;
   const oy = ((Math.floor(cam.y) % step) + step) % step;
+
+  ctx.save();
+  ctx.globalAlpha = 0.2;
+  ctx.strokeStyle = "#bdf7ff";
+  ctx.lineWidth = 1.5;
 
   for (let x = -ox - step; x < canvas.width + step; x += step) {
     ctx.beginPath();
@@ -399,6 +516,14 @@ function drawOcean(cam) {
     ctx.lineTo(canvas.width, y + 35);
     ctx.stroke();
   }
+
+  ctx.globalAlpha = 0.22;
+  for (let i = 0; i < 18; i += 1) {
+    const sx = (i * 67 + ox * 0.7) % (canvas.width + 50) - 25;
+    const sy = (i * 43 + oy * 0.9) % (canvas.height + 40) - 20;
+    ctx.fillStyle = i % 2 ? "#dfffff" : "#9fefff";
+    ctx.fillRect(sx, sy, 18, 2);
+  }
   ctx.restore();
 }
 
@@ -407,6 +532,26 @@ function islandColor(type) {
   if (type === "enemy") return "#ff8b73";
   if (type === "unique") return "#c68cff";
   return "#89df6d";
+}
+
+function drawKraken(x, y, chasing) {
+  ctx.save();
+  ctx.translate(x, y);
+  ctx.fillStyle = chasing ? "#9a2eff" : "#7f2ec7";
+  ctx.beginPath();
+  ctx.arc(0, 0, 14, 0, Math.PI * 2);
+  ctx.fill();
+
+  ctx.strokeStyle = chasing ? "#ff9fff" : "#bf90ff";
+  ctx.lineWidth = 2;
+  for (let i = 0; i < 6; i += 1) {
+    const angle = (Math.PI * 2 * i) / 6;
+    ctx.beginPath();
+    ctx.moveTo(Math.cos(angle) * 10, Math.sin(angle) * 10);
+    ctx.lineTo(Math.cos(angle) * 24, Math.sin(angle) * 24);
+    ctx.stroke();
+  }
+  ctx.restore();
 }
 
 function drawWorld(cam) {
@@ -430,7 +575,7 @@ function drawWorld(cam) {
 
     ctx.fillStyle = "#fffef8";
     ctx.font = "bold 12px sans-serif";
-    ctx.fillText(island.name, sx - island.r * 0.46, sy - island.r - 10);
+    ctx.fillText(island.name, sx - island.r * 0.5, sy - island.r - 10);
   }
 
   for (const res of resources) {
@@ -457,6 +602,13 @@ function drawWorld(cam) {
     ctx.beginPath();
     ctx.arc(sx, sy, 9, 0, Math.PI * 2);
     ctx.fill();
+  }
+
+  for (const k of krakens) {
+    const sx = k.x - cam.x;
+    const sy = k.y - cam.y;
+    if (sx < -50 || sx > canvas.width + 50 || sy < -50 || sy > canvas.height + 50) continue;
+    drawKraken(sx, sy, k.chasing);
   }
 
   if (state.mode === "ship") {
@@ -538,41 +690,87 @@ function drawWorld(cam) {
   ctx.restore();
 }
 
-function drawUi() {
-  ctx.fillStyle = "rgba(1,16,36,0.72)";
-  ctx.fillRect(10, 10, 540, 174);
-  ctx.fillStyle = "#f1fdff";
-  ctx.font = "15px sans-serif";
+function drawBar(x, y, w, h, ratio, color, bg = "rgba(255,255,255,0.14)") {
+  ctx.fillStyle = bg;
+  ctx.fillRect(x, y, w, h);
+  ctx.fillStyle = color;
+  ctx.fillRect(x + 2, y + 2, (w - 4) * Math.max(0, Math.min(1, ratio)), h - 4);
+}
 
-  const mode = state.mode === "ship" ? "корабль" : `пешком (${islandById(state.activeIslandId).name})`;
-  ctx.fillText(`Режим: ${mode}`, 20, 34);
-  ctx.fillText(`Координаты корабля X:${Math.round(state.ship.x)} Y:${Math.round(state.ship.y)}`, 20, 56);
-  ctx.fillText(`HP корабля: ${state.ship.hp.toFixed(0)}/${state.ship.maxHp} | HP персонажа: ${state.player.hp.toFixed(0)}/${state.player.maxHp}`, 20, 78);
-  ctx.fillText(`Ресурсы: дерево ${state.inventory.wood}, металл ${state.inventory.metal}, артефакты ${state.inventory.artifact}`, 20, 100);
-  ctx.fillText(`Трюм: ${cargoUsed()}/${cargoMax()} | Открыто островов: ${state.discovered.size}/${islands.length}`, 20, 122);
-  ctx.fillText(`Улучшения: скорость ${state.ship.speedLevel}, корпус ${state.ship.hullLevel}, трюм ${state.ship.cargoLevel}`, 20, 144);
-  ctx.fillText("Навигация: WASD, E - высадка/сбор, 1/2/3 - апгрейды на базе.", 20, 166);
+function drawUi() {
+  const panelX = 10;
+  const panelY = 10;
+  const panelW = 560;
+  const panelH = 196;
+
+  const panelGrad = ctx.createLinearGradient(panelX, panelY, panelX, panelY + panelH);
+  panelGrad.addColorStop(0, "rgba(4, 30, 66, 0.84)");
+  panelGrad.addColorStop(1, "rgba(2, 18, 44, 0.72)");
+  ctx.fillStyle = panelGrad;
+  ctx.fillRect(panelX, panelY, panelW, panelH);
+  ctx.strokeStyle = "rgba(133, 225, 255, 0.75)";
+  ctx.strokeRect(panelX, panelY, panelW, panelH);
+
+  const mode = state.mode === "ship" ? "🚢 корабль" : `🧍 пешком (${islandById(state.activeIslandId).name})`;
+
+  ctx.fillStyle = "#f1fdff";
+  ctx.font = "bold 16px sans-serif";
+  ctx.fillText(`Режим: ${mode}`, 22, 34);
+
+  ctx.font = "14px sans-serif";
+  ctx.fillStyle = "#dcf8ff";
+  ctx.fillText(`Координаты корабля: X ${Math.round(state.ship.x)} | Y ${Math.round(state.ship.y)}`, 22, 56);
+  ctx.fillText(`Скорость: ${Math.abs(state.ship.speed).toFixed(1)} узл.`, 22, 76);
+
+  drawBar(22, 88, 240, 14, state.ship.hp / state.ship.maxHp, "#ff7e6f");
+  drawBar(22, 112, 240, 14, state.player.hp / state.player.maxHp, "#8de36b");
+  drawBar(22, 136, 240, 14, cargoUsed() / cargoMax(), "#ffd56b");
+
+  ctx.fillStyle = "#f6f9ff";
+  ctx.font = "12px sans-serif";
+  ctx.fillText(`Корабль HP ${state.ship.hp.toFixed(0)}/${state.ship.maxHp}`, 270, 99);
+  ctx.fillText(`Персонаж HP ${state.player.hp.toFixed(0)}/${state.player.maxHp}`, 270, 123);
+  ctx.fillText(`Трюм ${cargoUsed()}/${cargoMax()} | Кракены рядом: ${krakens.length}`, 270, 147);
+
+  ctx.fillStyle = "#d2f7ff";
+  ctx.fillText(`Ресурсы: 🌲 ${state.inventory.wood}   ⚙ ${state.inventory.metal}   ✨ ${state.inventory.artifact}`, 22, 170);
+  ctx.fillText(`Апгрейды: ⚡ ${state.ship.speedLevel}   🛡 ${state.ship.hullLevel}   📦 ${state.ship.cargoLevel} | Побегов от кракена: ${state.krakenEscapes}`, 22, 188);
 
   if (state.noteTimer > 0) {
-    ctx.fillStyle = "rgba(0,0,0,0.55)";
-    ctx.fillRect(190, canvas.height - 45, 590, 30);
+    ctx.fillStyle = "rgba(2, 20, 40, 0.75)";
+    ctx.fillRect(170, canvas.height - 48, 620, 34);
+    ctx.strokeStyle = "rgba(124, 218, 255, 0.8)";
+    ctx.strokeRect(170, canvas.height - 48, 620, 34);
     ctx.fillStyle = "#f7fdff";
-    ctx.fillText(state.note, 200, canvas.height - 25);
+    ctx.font = "14px sans-serif";
+    ctx.fillText(state.note, 184, canvas.height - 26);
   }
 
-  const chartW = 250;
-  const chartH = 150;
+  const chartW = 280;
+  const chartH = 170;
   const chartX = canvas.width - chartW - 12;
   const chartY = 12;
 
-  ctx.fillStyle = "rgba(3,20,42,0.78)";
+  const mapGrad = ctx.createLinearGradient(chartX, chartY, chartX, chartY + chartH);
+  mapGrad.addColorStop(0, "rgba(6, 28, 58, 0.84)");
+  mapGrad.addColorStop(1, "rgba(2, 16, 36, 0.74)");
+  ctx.fillStyle = mapGrad;
   ctx.fillRect(chartX, chartY, chartW, chartH);
-  ctx.strokeStyle = "#76d8ff";
+  ctx.strokeStyle = "#79ddff";
   ctx.strokeRect(chartX, chartY, chartW, chartH);
 
   ctx.fillStyle = "#d5f3ff";
   ctx.font = "12px sans-serif";
-  ctx.fillText("Навигационная карта (только открытое)", chartX + 8, chartY + 16);
+  ctx.fillText("🧭 Навигационная карта (только открытое)", chartX + 8, chartY + 16);
+
+  for (let gx = 0; gx <= 4; gx += 1) {
+    const x = chartX + (gx / 4) * chartW;
+    ctx.strokeStyle = "rgba(130, 207, 236, 0.15)";
+    ctx.beginPath();
+    ctx.moveTo(x, chartY + 20);
+    ctx.lineTo(x, chartY + chartH);
+    ctx.stroke();
+  }
 
   for (const island of islands) {
     if (!state.discovered.has(island.id)) continue;
@@ -586,12 +784,13 @@ function drawUi() {
 
   ctx.fillStyle = "#ffb266";
   ctx.beginPath();
-  ctx.arc(chartX + (state.ship.x / world.width) * chartW, chartY + (state.ship.y / world.height) * chartH, 3, 0, Math.PI * 2);
+  ctx.arc(chartX + (state.ship.x / world.width) * chartW, chartY + (state.ship.y / world.height) * chartH, 3.5, 0, Math.PI * 2);
   ctx.fill();
 
   if (state.activeIslandId === "base" && state.mode === "ship") {
     ctx.fillStyle = "#ffe6bf";
-    ctx.fillText("База: 1 скорость, 2 корпус, 3 трюм, E ремонт", 565, 28);
+    ctx.font = "13px sans-serif";
+    ctx.fillText("База: 1 скорость · 2 корпус · 3 трюм · E ремонт", 582, 204);
   }
 
   if (state.hitFlash > 0) {

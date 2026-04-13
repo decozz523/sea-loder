@@ -3,32 +3,94 @@
   font-family: Inter, Segoe UI, Roboto, sans-serif;
 }
 
+* {
+  box-sizing: border-box;
+}
+
 body {
   margin: 0;
-  background: radial-gradient(circle at top, #16365c, #06131f 70%);
+  min-height: 100vh;
+  background:
+    radial-gradient(circle at 20% 0%, #2e6ac0 0%, transparent 40%),
+    radial-gradient(circle at 80% 10%, #2bc0d8 0%, transparent 32%),
+    linear-gradient(180deg, #0f2242 0%, #061526 70%);
   color: #e8f1fb;
 }
 
 .layout {
-  width: min(1000px, 94vw);
-  margin: 20px auto;
+  width: min(1240px, 94vw);
+  margin: 20px auto 28px;
+}
+
+.hero {
+  display: flex;
+  justify-content: space-between;
+  gap: 20px;
+  align-items: flex-start;
+  margin-bottom: 14px;
 }
 
 h1 {
   margin: 0;
-  font-size: 1.7rem;
+  font-size: clamp(1.4rem, 2.6vw, 2rem);
 }
 
 p {
-  opacity: 0.9;
+  margin: 8px 0 0;
+  opacity: 0.96;
   line-height: 1.35;
+  max-width: 760px;
+}
+
+.badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.badges span {
+  background: linear-gradient(160deg, rgba(122, 232, 255, 0.22), rgba(121, 143, 255, 0.2));
+  border: 1px solid rgba(161, 234, 255, 0.45);
+  border-radius: 999px;
+  padding: 7px 12px;
+  font-size: 0.8rem;
+}
+
+.game-shell {
+  display: grid;
+  grid-template-columns: 240px 1fr;
+  gap: 14px;
+  align-items: stretch;
+}
+
+.help-panel {
+  border: 1px solid rgba(130, 223, 255, 0.4);
+  border-radius: 14px;
+  background: linear-gradient(180deg, rgba(6, 31, 58, 0.72), rgba(3, 19, 42, 0.58));
+  padding: 14px;
+  box-shadow: inset 0 0 24px rgba(88, 202, 255, 0.12);
+}
+
+.help-panel h2 {
+  margin: 0 0 10px;
+  font-size: 1.02rem;
+}
+
+.help-panel ul {
+  margin: 0;
+  padding-left: 18px;
+  line-height: 1.6;
+  font-size: 0.92rem;
 }
 
 .game-wrap {
-  border: 1px solid #33587e;
-  border-radius: 12px;
+  border: 1px solid rgba(125, 220, 255, 0.5);
+  border-radius: 14px;
   overflow: hidden;
-  box-shadow: 0 15px 40px rgba(0, 0, 0, 0.35);
+  box-shadow:
+    0 18px 38px rgba(0, 0, 0, 0.42),
+    0 0 0 1px rgba(122, 231, 255, 0.15) inset;
 }
 
 canvas {
@@ -36,4 +98,18 @@ canvas {
   width: 100%;
   height: auto;
   background: #0c2d4f;
+}
+
+@media (max-width: 980px) {
+  .hero {
+    flex-direction: column;
+  }
+
+  .game-shell {
+    grid-template-columns: 1fr;
+  }
+
+  .help-panel {
+    order: 2;
+  }
 }
