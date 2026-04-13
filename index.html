@@ -3,20 +3,41 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Лодка на озере</title>
+    <title>Sea Loder — исследование островов</title>
     <link rel="stylesheet" href="styles.css" />
   </head>
   <body>
     <main class="layout">
-      <header>
-        <h1>Лодка на озере</h1>
-        <p>
-          WASD / стрелки — движение, <strong>E</strong> — действие в зоне. Поймай рыбу,
-          избегай угроз и улучшай лодку у причала.
-        </p>
+      <header class="hero">
+        <div>
+          <h1>Sea Loder: корабль и острова</h1>
+          <p>
+            Путешествуй по океану, открывай случайно сгенерированные острова, высаживайся за ресурсами
+            и прокачивай корабль на базе. Берегись кракенов: они могут сломать корабль, но от них можно уйти.
+          </p>
+        </div>
+        <div class="badges">
+          <span>Open Sea</span>
+          <span>Discovery Fog</span>
+          <span>Kraken Encounters</span>
+        </div>
       </header>
-      <section class="game-wrap">
-        <canvas id="game" width="960" height="540" aria-label="Игра лодка и озеро"></canvas>
+
+      <section class="game-shell">
+        <aside class="help-panel">
+          <h2>Управление</h2>
+          <ul>
+            <li><strong>W/S</strong> — ход корабля</li>
+            <li><strong>A/D</strong> — поворот</li>
+            <li><strong>E</strong> — высадка / сбор / док</li>
+            <li><strong>1/2/3</strong> — улучшения на базе</li>
+            <li><strong>WASD</strong> — движение пешком</li>
+          </ul>
+        </aside>
+
+        <section class="game-wrap">
+          <canvas id="game" width="960" height="540" aria-label="Игра про корабль и острова"></canvas>
+        </section>
       </section>
     </main>
     <script src="game.js"></script>
