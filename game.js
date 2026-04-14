@@ -1,5 +1,8 @@
 const canvas = document.getElementById("game");
 const ctx = canvas.getContext("2d");
+const controlProfileBadge = document.getElementById("control-profile-badge");
+const mobileControls = document.getElementById("mobile-controls");
+const actionButtons = mobileControls ? Array.from(mobileControls.querySelectorAll("button")) : [];
 
 const world = {
   width: 14000,
@@ -7,12 +10,62 @@ const world = {
 };
 
 const keys = new Set();
+const touchActions = new Set();
 const resources = [];
 const enemies = [];
 const krakens = [];
 
 function randomRange(min, max) {
   return min + Math.random() * (max - min);
+}
+
+const canvasRatio = 16 / 9;
+let uiScale = 1;
+
+function isMobileProfile() {
+  return window.matchMedia("(pointer: coarse)").matches || window.innerWidth <= 900;
+}
+
+function updateControlProfileUi() {
+  if (!controlProfileBadge || !mobileControls) return;
+  const mobile = isMobileProfile();
+  controlProfileBadge.textContent = mobile ? "Автонастройка: Телефон" : "Автонастройка: ПК";
+  mobileControls.style.display = mobile ? "block" : "none";
+}
+
+function resizeCanvas() {
+  const mobile = isMobileProfile();
+  const parentWidth = canvas.parentElement.clientWidth;
+  const targetHeight = mobile ? window.innerHeight : Math.min(window.innerHeight * 0.72, parentWidth / canvasRatio);
+  const logicalWidth = Math.max(mobile ? 360 : 760, Math.round(targetHeight * canvasRatio));
+  const logicalHeight = Math.max(mobile ? 640 : 430, Math.round(logicalWidth / canvasRatio));
+  canvas.width = logicalWidth;
+  canvas.height = logicalHeight;
+  uiScale = mobile ? Math.max(0.72, Math.min(0.9, canvas.width / 1000)) : Math.max(0.8, Math.min(1.08, canvas.width / 960));
+}
+
+function hasAction(name) {
+  return keys.has(name) || touchActions.has(name);
+}
+
+function triggerPrimaryAction() {
+  if (state.mode === "foot") gatherNearestResource();
+  tryLandOrBoard();
+}
+
+function triggerUpgrade(slot) {
+  tryUpgrade(slot);
+}
+
+function triggerSmartUpgrade() {
+  if (state.activeIslandId !== "base" || state.mode !== "ship") {
+    setNote("Апгрейды доступны на базе.");
+    return;
+  }
+
+  if (state.ship.speedLevel < 4) triggerUpgrade(1);
+  else if (state.ship.hullLevel < 4) triggerUpgrade(2);
+  else triggerUpgrade(3);
 }
 
 function createIslands() {
@@ -378,10 +431,10 @@ function handleShip(dt) {
   const reverse = 78;
   const drag = 0.975;
 
-  if (keys.has("a") || keys.has("arrowleft")) state.ship.angle -= turnRate * dt;
-  if (keys.has("d") || keys.has("arrowright")) state.ship.angle += turnRate * dt;
-  if (keys.has("w") || keys.has("arrowup")) state.ship.speed += accel * dt;
-  if (keys.has("s") || keys.has("arrowdown")) state.ship.speed -= reverse * dt;
+  if (hasAction("a") || hasAction("arrowleft") || hasAction("left")) state.ship.angle -= turnRate * dt;
+  if (hasAction("d") || hasAction("arrowright") || hasAction("right")) state.ship.angle += turnRate * dt;
+  if (hasAction("w") || hasAction("arrowup") || hasAction("up")) state.ship.speed += accel * dt;
+  if (hasAction("s") || hasAction("arrowdown") || hasAction("down")) state.ship.speed -= reverse * dt;
 
   state.ship.speed = Math.max(-60, Math.min(shipMaxSpeed(), state.ship.speed));
   state.ship.speed *= drag;
@@ -420,10 +473,10 @@ function handleFoot(dt) {
   let mx = 0;
   let my = 0;
 
-  if (keys.has("a") || keys.has("arrowleft")) mx -= 1;
-  if (keys.has("d") || keys.has("arrowright")) mx += 1;
-  if (keys.has("w") || keys.has("arrowup")) my -= 1;
-  if (keys.has("s") || keys.has("arrowdown")) my += 1;
+  if (hasAction("a") || hasAction("arrowleft") || hasAction("left")) mx -= 1;
+  if (hasAction("d") || hasAction("arrowright") || hasAction("right")) mx += 1;
+  if (hasAction("w") || hasAction("arrowup") || hasAction("up")) my -= 1;
+  if (hasAction("s") || hasAction("arrowdown") || hasAction("down")) my += 1;
 
   const len = Math.hypot(mx, my) || 1;
   mx /= len;
@@ -698,10 +751,11 @@ function drawBar(x, y, w, h, ratio, color, bg = "rgba(255,255,255,0.14)") {
 }
 
 function drawUi() {
-  const panelX = 10;
-  const panelY = 10;
-  const panelW = 560;
-  const panelH = 196;
+  const s = uiScale;
+  const panelX = 10 * s;
+  const panelY = 10 * s;
+  const panelW = 560 * s;
+  const panelH = 196 * s;
 
   const panelGrad = ctx.createLinearGradient(panelX, panelY, panelX, panelY + panelH);
   panelGrad.addColorStop(0, "rgba(4, 30, 66, 0.84)");
@@ -714,42 +768,42 @@ function drawUi() {
   const mode = state.mode === "ship" ? "🚢 корабль" : `🧍 пешком (${islandById(state.activeIslandId).name})`;
 
   ctx.fillStyle = "#f1fdff";
-  ctx.font = "bold 16px sans-serif";
-  ctx.fillText(`Режим: ${mode}`, 22, 34);
+  ctx.font = `bold ${Math.round(16 * s)}px sans-serif`;
+  ctx.fillText(`Режим: ${mode}`, 22 * s, 34 * s);
 
-  ctx.font = "14px sans-serif";
+  ctx.font = `${Math.round(14 * s)}px sans-serif`;
   ctx.fillStyle = "#dcf8ff";
-  ctx.fillText(`Координаты корабля: X ${Math.round(state.ship.x)} | Y ${Math.round(state.ship.y)}`, 22, 56);
-  ctx.fillText(`Скорость: ${Math.abs(state.ship.speed).toFixed(1)} узл.`, 22, 76);
+  ctx.fillText(`Координаты корабля: X ${Math.round(state.ship.x)} | Y ${Math.round(state.ship.y)}`, 22 * s, 56 * s);
+  ctx.fillText(`Скорость: ${Math.abs(state.ship.speed).toFixed(1)} узл.`, 22 * s, 76 * s);
 
-  drawBar(22, 88, 240, 14, state.ship.hp / state.ship.maxHp, "#ff7e6f");
-  drawBar(22, 112, 240, 14, state.player.hp / state.player.maxHp, "#8de36b");
-  drawBar(22, 136, 240, 14, cargoUsed() / cargoMax(), "#ffd56b");
+  drawBar(22 * s, 88 * s, 240 * s, 14 * s, state.ship.hp / state.ship.maxHp, "#ff7e6f");
+  drawBar(22 * s, 112 * s, 240 * s, 14 * s, state.player.hp / state.player.maxHp, "#8de36b");
+  drawBar(22 * s, 136 * s, 240 * s, 14 * s, cargoUsed() / cargoMax(), "#ffd56b");
 
   ctx.fillStyle = "#f6f9ff";
-  ctx.font = "12px sans-serif";
-  ctx.fillText(`Корабль HP ${state.ship.hp.toFixed(0)}/${state.ship.maxHp}`, 270, 99);
-  ctx.fillText(`Персонаж HP ${state.player.hp.toFixed(0)}/${state.player.maxHp}`, 270, 123);
-  ctx.fillText(`Трюм ${cargoUsed()}/${cargoMax()} | Кракены рядом: ${krakens.length}`, 270, 147);
+  ctx.font = `${Math.round(12 * s)}px sans-serif`;
+  ctx.fillText(`Корабль HP ${state.ship.hp.toFixed(0)}/${state.ship.maxHp}`, 270 * s, 99 * s);
+  ctx.fillText(`Персонаж HP ${state.player.hp.toFixed(0)}/${state.player.maxHp}`, 270 * s, 123 * s);
+  ctx.fillText(`Трюм ${cargoUsed()}/${cargoMax()} | Кракены рядом: ${krakens.length}`, 270 * s, 147 * s);
 
   ctx.fillStyle = "#d2f7ff";
-  ctx.fillText(`Ресурсы: 🌲 ${state.inventory.wood}   ⚙ ${state.inventory.metal}   ✨ ${state.inventory.artifact}`, 22, 170);
-  ctx.fillText(`Апгрейды: ⚡ ${state.ship.speedLevel}   🛡 ${state.ship.hullLevel}   📦 ${state.ship.cargoLevel} | Побегов от кракена: ${state.krakenEscapes}`, 22, 188);
+  ctx.fillText(`Ресурсы: 🌲 ${state.inventory.wood}   ⚙ ${state.inventory.metal}   ✨ ${state.inventory.artifact}`, 22 * s, 170 * s);
+  ctx.fillText(`Апгрейды: ⚡ ${state.ship.speedLevel}   🛡 ${state.ship.hullLevel}   📦 ${state.ship.cargoLevel} | Побегов от кракена: ${state.krakenEscapes}`, 22 * s, 188 * s);
 
   if (state.noteTimer > 0) {
     ctx.fillStyle = "rgba(2, 20, 40, 0.75)";
-    ctx.fillRect(170, canvas.height - 48, 620, 34);
+    ctx.fillRect(170 * s, canvas.height - 48 * s, 620 * s, 34 * s);
     ctx.strokeStyle = "rgba(124, 218, 255, 0.8)";
-    ctx.strokeRect(170, canvas.height - 48, 620, 34);
+    ctx.strokeRect(170 * s, canvas.height - 48 * s, 620 * s, 34 * s);
     ctx.fillStyle = "#f7fdff";
-    ctx.font = "14px sans-serif";
-    ctx.fillText(state.note, 184, canvas.height - 26);
+    ctx.font = `${Math.round(14 * s)}px sans-serif`;
+    ctx.fillText(state.note, 184 * s, canvas.height - 26 * s);
   }
 
-  const chartW = 280;
-  const chartH = 170;
-  const chartX = canvas.width - chartW - 12;
-  const chartY = 12;
+  const chartW = 280 * s;
+  const chartH = 170 * s;
+  const chartX = canvas.width - chartW - 12 * s;
+  const chartY = 12 * s;
 
   const mapGrad = ctx.createLinearGradient(chartX, chartY, chartX, chartY + chartH);
   mapGrad.addColorStop(0, "rgba(6, 28, 58, 0.84)");
@@ -760,14 +814,14 @@ function drawUi() {
   ctx.strokeRect(chartX, chartY, chartW, chartH);
 
   ctx.fillStyle = "#d5f3ff";
-  ctx.font = "12px sans-serif";
-  ctx.fillText("🧭 Навигационная карта (только открытое)", chartX + 8, chartY + 16);
+  ctx.font = `${Math.round(12 * s)}px sans-serif`;
+  ctx.fillText("🧭 Навигационная карта (только открытое)", chartX + 8 * s, chartY + 16 * s);
 
   for (let gx = 0; gx <= 4; gx += 1) {
     const x = chartX + (gx / 4) * chartW;
     ctx.strokeStyle = "rgba(130, 207, 236, 0.15)";
     ctx.beginPath();
-    ctx.moveTo(x, chartY + 20);
+    ctx.moveTo(x, chartY + 20 * s);
     ctx.lineTo(x, chartY + chartH);
     ctx.stroke();
   }
@@ -784,13 +838,13 @@ function drawUi() {
 
   ctx.fillStyle = "#ffb266";
   ctx.beginPath();
-  ctx.arc(chartX + (state.ship.x / world.width) * chartW, chartY + (state.ship.y / world.height) * chartH, 3.5, 0, Math.PI * 2);
+  ctx.arc(chartX + (state.ship.x / world.width) * chartW, chartY + (state.ship.y / world.height) * chartH, 3.5 * s, 0, Math.PI * 2);
   ctx.fill();
 
   if (state.activeIslandId === "base" && state.mode === "ship") {
     ctx.fillStyle = "#ffe6bf";
-    ctx.font = "13px sans-serif";
-    ctx.fillText("База: 1 скорость · 2 корпус · 3 трюм · E ремонт", 582, 204);
+    ctx.font = `${Math.round(13 * s)}px sans-serif`;
+    ctx.fillText("База: 1 скорость · 2 корпус · 3 трюм · E ремонт", 582 * s, 204 * s);
   }
 
   if (state.hitFlash > 0) {
@@ -811,18 +865,55 @@ document.addEventListener("keydown", (event) => {
   keys.add(key);
 
   if (key === "e") {
-    if (state.mode === "foot") gatherNearestResource();
-    tryLandOrBoard();
+    triggerPrimaryAction();
   }
 
   if (key === "1" || key === "2" || key === "3") {
-    tryUpgrade(Number(key));
+    triggerUpgrade(Number(key));
   }
 });
 
 document.addEventListener("keyup", (event) => {
   keys.delete(event.key.toLowerCase());
 });
+
+function bindTouchControl(btn, action) {
+  const press = (event) => {
+    event.preventDefault();
+    touchActions.add(action);
+    btn.classList.add("is-active");
+    if (action === "interact") triggerPrimaryAction();
+    if (action === "upgrade-open") triggerSmartUpgrade();
+    if (action === "upgrade1") triggerUpgrade(1);
+    if (action === "upgrade2") triggerUpgrade(2);
+    if (action === "upgrade3") triggerUpgrade(3);
+  };
+
+  const release = (event) => {
+    event.preventDefault();
+    touchActions.delete(action);
+    btn.classList.remove("is-active");
+  };
+
+  btn.addEventListener("touchstart", press, { passive: false });
+  btn.addEventListener("touchend", release, { passive: false });
+  btn.addEventListener("touchcancel", release, { passive: false });
+  btn.addEventListener("mousedown", press);
+  btn.addEventListener("mouseup", release);
+  btn.addEventListener("mouseleave", release);
+}
+
+for (const btn of actionButtons) {
+  bindTouchControl(btn, btn.dataset.action);
+}
+
+window.addEventListener("resize", () => {
+  updateControlProfileUi();
+  resizeCanvas();
+});
+
+updateControlProfileUi();
+resizeCanvas();
 
 let previous = performance.now();
 function frame(now) {

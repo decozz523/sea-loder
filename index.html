@@ -20,12 +20,16 @@
           <span>Open Sea</span>
           <span>Discovery Fog</span>
           <span>Kraken Encounters</span>
+          <span id="control-profile-badge">Автонастройка: ПК</span>
         </div>
       </header>
 
       <section class="game-shell">
         <aside class="help-panel">
           <h2>Управление</h2>
+          <p class="help-note">
+            Игра сама переключает профиль управления: клавиатура на ПК и экранные кнопки на телефоне.
+          </p>
           <ul>
             <li><strong>W/S</strong> — ход корабля</li>
             <li><strong>A/D</strong> — поворот</li>
@@ -37,6 +41,28 @@
 
         <section class="game-wrap">
           <canvas id="game" width="960" height="540" aria-label="Игра про корабль и острова"></canvas>
+
+          <div class="mobile-controls" id="mobile-controls" aria-label="Экранные кнопки управления">
+            <div class="mobile-joystick">
+              <div class="joystick-base">
+                <div class="joystick-thumb"></div>
+              </div>
+              <button data-action="up" aria-label="Вверх"></button>
+              <button data-action="down" aria-label="Вниз"></button>
+              <button data-action="left" aria-label="Влево"></button>
+              <button data-action="right" aria-label="Вправо"></button>
+            </div>
+
+            <div class="mobile-actions">
+              <button class="action-main" data-action="interact">⛵ Exit / E</button>
+              <button class="action-main" data-action="upgrade-open">⚙ Upgrade</button>
+              <div class="upgrade-row">
+                <button data-action="upgrade1">1</button>
+                <button data-action="upgrade2">2</button>
+                <button data-action="upgrade3">3</button>
+              </div>
+            </div>
+          </div>
         </section>
       </section>
     </main>
