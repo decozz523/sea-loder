@@ -95,7 +95,29 @@ function createIslands() {
     });
   }
 
-  return generated;
+  if (generated.length < totalIslands) {
+    let fallbackIndex = 0;
+    while (generated.length < totalIslands && fallbackIndex < 600) {
+      fallbackIndex += 1;
+      const r = randomRange(150, 210);
+      const x = 1400 + (fallbackIndex % 8) * ((world.width - 2200) / 7);
+      const y = 600 + Math.floor(fallbackIndex / 8) * 560;
+      if (y > world.height - 350) continue;
+      const tooClose = generated.some((island) => Math.hypot(island.x - x, island.y - y) < island.r + r + 380);
+      if (tooClose) continue;
+      const type = typePool[Math.floor(Math.random() * typePool.length)];
+      const id = `i${generated.length}`;
+      generated.push({
+        id,
+        x: Math.round(x),
+        y: Math.round(y),
+        r: Math.round(r),
+        type,
+        name: `${type === "unique" ? "Реликт" : type === "enemy" ? "Опасный" : "Дикий"} (${Math.round(x)},${Math.round(y)})`,
+      });
+    }
+  }
+  return generated.slice(0, totalIslands);
 }
 
 const islands = createIslands();
@@ -164,6 +186,15 @@ const state = {
   hitFlash: 0,
   krakenCooldown: 11,
   krakenEscapes: 0,
+  sonarCooldown: 0,
+  mission: {
+    targetKind: "metal",
+    required: 4,
+    delivered: 0,
+    rewardWood: 3,
+    rewardMetal: 2,
+    rewardArtifact: 1,
+  },
 };
 
 function shipMaxSpeed() {
@@ -181,6 +212,21 @@ function cargoUsed() {
 function setNote(text, ttl = 2.8) {
   state.note = text;
   state.noteTimer = ttl;
+}
+
+function rollMission() {
+  const targets = [
+    { kind: "wood", required: 6 },
+    { kind: "metal", required: 5 },
+    { kind: "artifact", required: 2 },
+  ];
+  const pick = targets[Math.floor(Math.random() * targets.length)];
+  state.mission.targetKind = pick.kind;
+  state.mission.required = pick.required;
+  state.mission.delivered = 0;
+  state.mission.rewardWood = pick.kind === "artifact" ? 4 : 2;
+  state.mission.rewardMetal = pick.kind === "wood" ? 4 : 3;
+  state.mission.rewardArtifact = pick.kind === "artifact" ? 2 : 1;
 }
 
 function getNearIsland(x, y, extra = 0) {
@@ -227,6 +273,46 @@ function dockAndRepair() {
   }
   state.ship.hp = state.ship.maxHp;
   setNote("Корабль полностью отремонтирован.");
+}
+
+function deliverMissionAtBase() {
+  if (state.activeIslandId !== "base" || state.mode !== "ship") return;
+  const m = state.mission;
+  const needed = m.required - m.delivered;
+  if (needed <= 0) {
+    state.inventory.wood += m.rewardWood;
+    state.inventory.metal += m.rewardMetal;
+    state.inventory.artifact += m.rewardArtifact;
+    setNote(`Контракт завершён! Награда: 🌲${m.rewardWood} ⚙${m.rewardMetal} ✨${m.rewardArtifact}`, 3.8);
+    rollMission();
+    return;
+  }
+  const canDeliver = Math.min(needed, state.inventory[m.targetKind]);
+  if (canDeliver <= 0) return;
+  state.inventory[m.targetKind] -= canDeliver;
+  m.delivered += canDeliver;
+  setNote(`Контракт: сдано ${m.delivered}/${m.required} (${m.targetKind}).`, 2.4);
+}
+
+function triggerSonarPulse() {
+  if (state.mode !== "ship") {
+    setNote("Сканер работает только на корабле.");
+    return;
+  }
+  if (state.sonarCooldown > 0) {
+    setNote(`Сканер перезаряжается: ${state.sonarCooldown.toFixed(1)}с.`);
+    return;
+  }
+  let revealed = 0;
+  for (const island of islands) {
+    const d = Math.hypot(state.ship.x - island.x, state.ship.y - island.y);
+    if (d < 980 && !state.discovered.has(island.id)) {
+      state.discovered.add(island.id);
+      revealed += 1;
+    }
+  }
+  state.sonarCooldown = 14;
+  setNote(revealed > 0 ? `Сканер: открыто островов ${revealed}.` : "Сканер: рядом новых островов нет.", 2.8);
 }
 
 function tryUpgrade(slot) {
@@ -301,6 +387,10 @@ function canUpgradeNow(slot) {
   );
 }
 
+function canSonarNow() {
+  return state.mode === "ship" && state.sonarCooldown <= 0;
+}
+
 function updateMobileActionAvailability() {
   if (!mobileControls) return;
   for (const button of actionButtons) {
@@ -310,6 +400,7 @@ function updateMobileActionAvailability() {
     if (action === "upgrade1") enabled = canUpgradeNow(1);
     if (action === "upgrade2") enabled = canUpgradeNow(2);
     if (action === "upgrade3") enabled = canUpgradeNow(3);
+    if (action === "sonar") enabled = canSonarNow();
 
     button.disabled = !enabled;
     button.classList.toggle("is-disabled", !enabled);
@@ -348,7 +439,11 @@ function tryLandOrBoard() {
 
     state.mode = "ship";
     state.player.hp = state.player.maxHp;
-    if (state.activeIslandId === "base") dockAndRepair();
+    if (state.activeIslandId === "base") {
+      dockAndRepair();
+      deliverMissionAtBase();
+      return;
+    }
     setNote("Вы снова на корабле.");
   }
 }
@@ -381,6 +476,10 @@ function gatherNearestResource() {
 
   nearest.taken = true;
   state.inventory[nearest.kind] += 1;
+  if (nearest.kind === state.mission.targetKind && state.activeIslandId !== "base") {
+    setNote(`Собрано: ${nearest.kind}. Контракт: доставь на базу ${state.mission.delivered}/${state.mission.required}.`);
+    return;
+  }
   setNote(`Собрано: ${nearest.kind}.`);
 }
 
@@ -477,13 +576,15 @@ function handleShip(dt) {
   const accel = 140;
   const reverse = 78;
   const drag = 0.975;
-  const joyX = joystickState.active ? joystickState.x : 0;
-  const joyY = joystickState.active ? joystickState.y : 0;
+  const joyXRaw = joystickState.active ? joystickState.x : 0;
+  const joyYRaw = joystickState.active ? joystickState.y : 0;
+  const deadTurn = Math.abs(joyXRaw) > 0.34 ? joyXRaw : 0;
+  const deadThrottle = Math.abs(joyYRaw) > 0.2 ? joyYRaw : 0;
 
-  if (hasAction("a") || hasAction("arrowleft") || joyX < -0.22) state.ship.angle -= turnRate * dt * Math.max(1, Math.abs(joyX));
-  if (hasAction("d") || hasAction("arrowright") || joyX > 0.22) state.ship.angle += turnRate * dt * Math.max(1, Math.abs(joyX));
-  if (hasAction("w") || hasAction("arrowup") || joyY < -0.16) state.ship.speed += accel * dt * Math.max(1, Math.abs(joyY));
-  if (hasAction("s") || hasAction("arrowdown") || joyY > 0.16) state.ship.speed -= reverse * dt * Math.max(1, Math.abs(joyY));
+  if (hasAction("a") || hasAction("arrowleft") || deadTurn < 0) state.ship.angle -= turnRate * dt * Math.max(1, Math.abs(deadTurn));
+  if (hasAction("d") || hasAction("arrowright") || deadTurn > 0) state.ship.angle += turnRate * dt * Math.max(1, Math.abs(deadTurn));
+  if (hasAction("w") || hasAction("arrowup") || deadThrottle < 0) state.ship.speed += accel * dt * Math.max(1, Math.abs(deadThrottle));
+  if (hasAction("s") || hasAction("arrowdown") || deadThrottle > 0) state.ship.speed -= reverse * dt * Math.max(1, Math.abs(deadThrottle));
 
   state.ship.speed = Math.max(-60, Math.min(shipMaxSpeed(), state.ship.speed));
   state.ship.speed *= drag;
@@ -580,6 +681,7 @@ function handleFoot(dt) {
 function update(dt) {
   if (state.noteTimer > 0) state.noteTimer -= dt;
   state.hitFlash = Math.max(0, state.hitFlash - dt * 2.2);
+  state.sonarCooldown = Math.max(0, state.sonarCooldown - dt);
 
   if (state.mode === "ship") handleShip(dt);
   else handleFoot(dt);
@@ -808,7 +910,7 @@ function drawUi() {
   const panelX = 10 * s;
   const panelY = 10 * s;
   const panelW = 560 * s;
-  const panelH = 196 * s;
+  const panelH = 216 * s;
 
   const panelGrad = ctx.createLinearGradient(panelX, panelY, panelX, panelY + panelH);
   panelGrad.addColorStop(0, "rgba(4, 30, 66, 0.84)");
@@ -842,6 +944,7 @@ function drawUi() {
   ctx.fillStyle = "#d2f7ff";
   ctx.fillText(`Ресурсы: 🌲 ${state.inventory.wood}   ⚙ ${state.inventory.metal}   ✨ ${state.inventory.artifact}`, 22 * s, 170 * s);
   ctx.fillText(`Апгрейды: ⚡ ${state.ship.speedLevel}   🛡 ${state.ship.hullLevel}   📦 ${state.ship.cargoLevel} | Побегов от кракена: ${state.krakenEscapes}`, 22 * s, 188 * s);
+  ctx.fillText(`Контракт: ${state.mission.targetKind} ${state.mission.delivered}/${state.mission.required} | Скан: ${state.sonarCooldown <= 0 ? "готов" : `${state.sonarCooldown.toFixed(1)}с`}`, 22 * s, 206 * s);
 
   if (state.noteTimer > 0) {
     ctx.fillStyle = "rgba(2, 20, 40, 0.75)";
@@ -897,7 +1000,7 @@ function drawUi() {
   if (state.activeIslandId === "base" && state.mode === "ship") {
     ctx.fillStyle = "#ffe6bf";
     ctx.font = `${Math.round(13 * s)}px sans-serif`;
-    ctx.fillText("База: 1 скорость · 2 корпус · 3 трюм · E ремонт", 582 * s, 204 * s);
+    ctx.fillText("База: 1 скорость · 2 корпус · 3 трюм · E ремонт/контракт · 4 скан", 474 * s, 204 * s);
   }
 
   if (state.hitFlash > 0) {
@@ -920,6 +1023,9 @@ document.addEventListener("keydown", (event) => {
   if (key === "e") {
     triggerPrimaryAction();
   }
+  if (key === "4") {
+    triggerSonarPulse();
+  }
 
   if (key === "1" || key === "2" || key === "3") {
     triggerUpgrade(Number(key));
@@ -937,6 +1043,7 @@ function bindTouchControl(btn, action) {
     touchActions.add(action);
     btn.classList.add("is-active");
     if (action === "interact") triggerPrimaryAction();
+    if (action === "sonar") triggerSonarPulse();
     if (action === "upgrade1") triggerUpgrade(1);
     if (action === "upgrade2") triggerUpgrade(2);
     if (action === "upgrade3") triggerUpgrade(3);
@@ -1019,6 +1126,7 @@ window.addEventListener("resize", () => {
 
 updateControlProfileUi();
 resizeCanvas();
+rollMission();
 
 let previous = performance.now();
 function frame(now) {
