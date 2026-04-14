@@ -10,8 +10,8 @@
     <main class="layout">
       <header class="hero">
         <div>
-          <h1>Sea Loder: корабль и острова</h1>
-          <p>
+          <h1>Sea Loder</h1>
+          <p class="hero-description">
             Путешествуй по океану, открывай случайно сгенерированные острова, высаживайся за ресурсами
             и прокачивай корабль на базе. Берегись кракенов: они могут сломать корабль, но от них можно уйти.
           </p>
@@ -44,15 +44,13 @@
 
           <div class="mobile-controls" id="mobile-controls" aria-label="Экранные кнопки управления">
             <div class="move-pad">
-              <button data-action="up">▲</button>
-              <div class="middle-row">
-                <button data-action="left">◀</button>
-                <button data-action="down">▼</button>
-                <button data-action="right">▶</button>
+              <div class="joystick" id="joystick" aria-label="Виртуальный джойстик движения">
+                <div class="joystick-knob" id="joystick-knob"></div>
               </div>
             </div>
             <div class="action-pad">
               <button data-action="interact">E / Действие</button>
+              <button data-action="sonar">Скан 🔎</button>
               <button data-action="upgrade1">1 ⚡</button>
               <button data-action="upgrade2">2 🛡</button>
               <button data-action="upgrade3">3 📦</button>

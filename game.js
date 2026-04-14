@@ -3,6 +3,8 @@ const ctx = canvas.getContext("2d");
 const controlProfileBadge = document.getElementById("control-profile-badge");
 const mobileControls = document.getElementById("mobile-controls");
 const actionButtons = mobileControls ? Array.from(mobileControls.querySelectorAll("button")) : [];
+const joystick = document.getElementById("joystick");
+const joystickKnob = document.getElementById("joystick-knob");
 
 const world = {
   width: 14000,
@@ -11,6 +13,7 @@ const world = {
 
 const keys = new Set();
 const touchActions = new Set();
+const joystickState = { active: false, x: 0, y: 0 };
 const resources = [];
 const enemies = [];
 const krakens = [];
@@ -56,6 +59,15 @@ function triggerUpgrade(slot) {
   tryUpgrade(slot);
 }
 
+function getUpgradeOption(slot) {
+  const options = {
+    1: { key: "speedLevel", max: 4, w: 8, m: 6, a: 0, name: "Скорость" },
+    2: { key: "hullLevel", max: 4, w: 5, m: 10, a: 0, name: "Прочность" },
+    3: { key: "cargoLevel", max: 4, w: 10, m: 3, a: 1, name: "Трюм" },
+  };
+  return options[slot];
+}
+
 function createIslands() {
   const generated = [{ id: "base", x: 900, y: 8300, r: 210, type: "base", name: "База" }];
   const totalIslands = 11;
@@ -83,7 +95,29 @@ function createIslands() {
     });
   }
 
-  return generated;
+  if (generated.length < totalIslands) {
+    let fallbackIndex = 0;
+    while (generated.length < totalIslands && fallbackIndex < 600) {
+      fallbackIndex += 1;
+      const r = randomRange(150, 210);
+      const x = 1400 + (fallbackIndex % 8) * ((world.width - 2200) / 7);
+      const y = 600 + Math.floor(fallbackIndex / 8) * 560;
+      if (y > world.height - 350) continue;
+      const tooClose = generated.some((island) => Math.hypot(island.x - x, island.y - y) < island.r + r + 380);
+      if (tooClose) continue;
+      const type = typePool[Math.floor(Math.random() * typePool.length)];
+      const id = `i${generated.length}`;
+      generated.push({
+        id,
+        x: Math.round(x),
+        y: Math.round(y),
+        r: Math.round(r),
+        type,
+        name: `${type === "unique" ? "Реликт" : type === "enemy" ? "Опасный" : "Дикий"} (${Math.round(x)},${Math.round(y)})`,
+      });
+    }
+  }
+  return generated.slice(0, totalIslands);
 }
 
 const islands = createIslands();
@@ -152,6 +186,15 @@ const state = {
   hitFlash: 0,
   krakenCooldown: 11,
   krakenEscapes: 0,
+  sonarCooldown: 0,
+  mission: {
+    targetKind: "metal",
+    required: 4,
+    delivered: 0,
+    rewardWood: 3,
+    rewardMetal: 2,
+    rewardArtifact: 1,
+  },
 };
 
 function shipMaxSpeed() {
@@ -169,6 +212,21 @@ function cargoUsed() {
 function setNote(text, ttl = 2.8) {
   state.note = text;
   state.noteTimer = ttl;
+}
+
+function rollMission() {
+  const targets = [
+    { kind: "wood", required: 6 },
+    { kind: "metal", required: 5 },
+    { kind: "artifact", required: 2 },
+  ];
+  const pick = targets[Math.floor(Math.random() * targets.length)];
+  state.mission.targetKind = pick.kind;
+  state.mission.required = pick.required;
+  state.mission.delivered = 0;
+  state.mission.rewardWood = pick.kind === "artifact" ? 4 : 2;
+  state.mission.rewardMetal = pick.kind === "wood" ? 4 : 3;
+  state.mission.rewardArtifact = pick.kind === "artifact" ? 2 : 1;
 }
 
 function getNearIsland(x, y, extra = 0) {
@@ -217,16 +275,49 @@ function dockAndRepair() {
   setNote("Корабль полностью отремонтирован.");
 }
 
+function deliverMissionAtBase() {
+  if (state.activeIslandId !== "base" || state.mode !== "ship") return;
+  const m = state.mission;
+  const needed = m.required - m.delivered;
+  if (needed <= 0) {
+    state.inventory.wood += m.rewardWood;
+    state.inventory.metal += m.rewardMetal;
+    state.inventory.artifact += m.rewardArtifact;
+    setNote(`Контракт завершён! Награда: 🌲${m.rewardWood} ⚙${m.rewardMetal} ✨${m.rewardArtifact}`, 3.8);
+    rollMission();
+    return;
+  }
+  const canDeliver = Math.min(needed, state.inventory[m.targetKind]);
+  if (canDeliver <= 0) return;
+  state.inventory[m.targetKind] -= canDeliver;
+  m.delivered += canDeliver;
+  setNote(`Контракт: сдано ${m.delivered}/${m.required} (${m.targetKind}).`, 2.4);
+}
+
+function triggerSonarPulse() {
+  if (state.mode !== "ship") {
+    setNote("Сканер работает только на корабле.");
+    return;
+  }
+  if (state.sonarCooldown > 0) {
+    setNote(`Сканер перезаряжается: ${state.sonarCooldown.toFixed(1)}с.`);
+    return;
+  }
+  let revealed = 0;
+  for (const island of islands) {
+    const d = Math.hypot(state.ship.x - island.x, state.ship.y - island.y);
+    if (d < 980 && !state.discovered.has(island.id)) {
+      state.discovered.add(island.id);
+      revealed += 1;
+    }
+  }
+  state.sonarCooldown = 14;
+  setNote(revealed > 0 ? `Сканер: открыто островов ${revealed}.` : "Сканер: рядом новых островов нет.", 2.8);
+}
+
 function tryUpgrade(slot) {
   if (state.mode !== "ship" || state.activeIslandId !== "base") return;
-
-  const options = {
-    1: { key: "speedLevel", max: 4, w: 8, m: 6, a: 0, name: "Скорость" },
-    2: { key: "hullLevel", max: 4, w: 5, m: 10, a: 0, name: "Прочность" },
-    3: { key: "cargoLevel", max: 4, w: 10, m: 3, a: 1, name: "Трюм" },
-  };
-
-  const up = options[slot];
+  const up = getUpgradeOption(slot);
   if (!up) return;
 
   if (state.ship[up.key] >= up.max) {
@@ -261,6 +352,65 @@ function tryUpgrade(slot) {
   setNote(`${up.name} улучшена до ${state.ship[up.key]} ур.`);
 }
 
+function nearestCollectibleDistance() {
+  if (state.mode !== "foot") return Infinity;
+  let best = Infinity;
+  for (const res of resources) {
+    if (res.taken || res.islandId !== state.activeIslandId) continue;
+    const d = Math.hypot(res.x - state.player.x, res.y - state.player.y);
+    if (d < best) best = d;
+  }
+  return best;
+}
+
+function canInteractNow() {
+  if (state.mode === "ship") {
+    const island = getNearIsland(state.ship.x, state.ship.y, 28);
+    return Boolean(island && Math.abs(state.ship.speed) <= 20);
+  }
+
+  const island = islandById(state.activeIslandId);
+  const nearShip = Math.hypot(state.player.x - state.ship.x, state.player.y - state.ship.y) <= island.r + 55;
+  return nearShip || nearestCollectibleDistance() <= 30;
+}
+
+function canUpgradeNow(slot) {
+  if (state.mode !== "ship" || state.activeIslandId !== "base") return false;
+  const up = getUpgradeOption(slot);
+  if (!up) return false;
+  if (state.ship[up.key] >= up.max) return false;
+  const tier = state.ship[up.key] + 1;
+  return (
+    state.inventory.wood >= up.w * tier &&
+    state.inventory.metal >= up.m * tier &&
+    state.inventory.artifact >= up.a * tier
+  );
+}
+
+function canSonarNow() {
+  return state.mode === "ship" && state.sonarCooldown <= 0;
+}
+
+function updateMobileActionAvailability() {
+  if (!mobileControls) return;
+  for (const button of actionButtons) {
+    const action = button.dataset.action;
+    let enabled = true;
+    if (action === "interact") enabled = canInteractNow();
+    if (action === "upgrade1") enabled = canUpgradeNow(1);
+    if (action === "upgrade2") enabled = canUpgradeNow(2);
+    if (action === "upgrade3") enabled = canUpgradeNow(3);
+    if (action === "sonar") enabled = canSonarNow();
+
+    button.disabled = !enabled;
+    button.classList.toggle("is-disabled", !enabled);
+    if (!enabled) {
+      touchActions.delete(action);
+      button.classList.remove("is-active");
+    }
+  }
+}
+
 function tryLandOrBoard() {
   if (state.mode === "ship") {
     if (Math.abs(state.ship.speed) > 20) {
@@ -289,7 +439,11 @@ function tryLandOrBoard() {
 
     state.mode = "ship";
     state.player.hp = state.player.maxHp;
-    if (state.activeIslandId === "base") dockAndRepair();
+    if (state.activeIslandId === "base") {
+      dockAndRepair();
+      deliverMissionAtBase();
+      return;
+    }
     setNote("Вы снова на корабле.");
   }
 }
@@ -322,6 +476,10 @@ function gatherNearestResource() {
 
   nearest.taken = true;
   state.inventory[nearest.kind] += 1;
+  if (nearest.kind === state.mission.targetKind && state.activeIslandId !== "base") {
+    setNote(`Собрано: ${nearest.kind}. Контракт: доставь на базу ${state.mission.delivered}/${state.mission.required}.`);
+    return;
+  }
   setNote(`Собрано: ${nearest.kind}.`);
 }
 
@@ -418,11 +576,15 @@ function handleShip(dt) {
   const accel = 140;
   const reverse = 78;
   const drag = 0.975;
+  const joyXRaw = joystickState.active ? joystickState.x : 0;
+  const joyYRaw = joystickState.active ? joystickState.y : 0;
+  const deadTurn = Math.abs(joyXRaw) > 0.34 ? joyXRaw : 0;
+  const deadThrottle = Math.abs(joyYRaw) > 0.2 ? joyYRaw : 0;
 
-  if (hasAction("a") || hasAction("arrowleft") || hasAction("left")) state.ship.angle -= turnRate * dt;
-  if (hasAction("d") || hasAction("arrowright") || hasAction("right")) state.ship.angle += turnRate * dt;
-  if (hasAction("w") || hasAction("arrowup") || hasAction("up")) state.ship.speed += accel * dt;
-  if (hasAction("s") || hasAction("arrowdown") || hasAction("down")) state.ship.speed -= reverse * dt;
+  if (hasAction("a") || hasAction("arrowleft") || deadTurn < 0) state.ship.angle -= turnRate * dt * Math.max(1, Math.abs(deadTurn));
+  if (hasAction("d") || hasAction("arrowright") || deadTurn > 0) state.ship.angle += turnRate * dt * Math.max(1, Math.abs(deadTurn));
+  if (hasAction("w") || hasAction("arrowup") || deadThrottle < 0) state.ship.speed += accel * dt * Math.max(1, Math.abs(deadThrottle));
+  if (hasAction("s") || hasAction("arrowdown") || deadThrottle > 0) state.ship.speed -= reverse * dt * Math.max(1, Math.abs(deadThrottle));
 
   state.ship.speed = Math.max(-60, Math.min(shipMaxSpeed(), state.ship.speed));
   state.ship.speed *= drag;
@@ -460,11 +622,15 @@ function handleFoot(dt) {
   const island = islandById(state.activeIslandId);
   let mx = 0;
   let my = 0;
+  const joyX = joystickState.active ? joystickState.x : 0;
+  const joyY = joystickState.active ? joystickState.y : 0;
 
-  if (hasAction("a") || hasAction("arrowleft") || hasAction("left")) mx -= 1;
-  if (hasAction("d") || hasAction("arrowright") || hasAction("right")) mx += 1;
-  if (hasAction("w") || hasAction("arrowup") || hasAction("up")) my -= 1;
-  if (hasAction("s") || hasAction("arrowdown") || hasAction("down")) my += 1;
+  if (hasAction("a") || hasAction("arrowleft")) mx -= 1;
+  if (hasAction("d") || hasAction("arrowright")) mx += 1;
+  if (hasAction("w") || hasAction("arrowup")) my -= 1;
+  if (hasAction("s") || hasAction("arrowdown")) my += 1;
+  mx += joyX;
+  my += joyY;
 
   const len = Math.hypot(mx, my) || 1;
   mx /= len;
@@ -515,6 +681,7 @@ function handleFoot(dt) {
 function update(dt) {
   if (state.noteTimer > 0) state.noteTimer -= dt;
   state.hitFlash = Math.max(0, state.hitFlash - dt * 2.2);
+  state.sonarCooldown = Math.max(0, state.sonarCooldown - dt);
 
   if (state.mode === "ship") handleShip(dt);
   else handleFoot(dt);
@@ -743,7 +910,7 @@ function drawUi() {
   const panelX = 10 * s;
   const panelY = 10 * s;
   const panelW = 560 * s;
-  const panelH = 196 * s;
+  const panelH = 216 * s;
 
   const panelGrad = ctx.createLinearGradient(panelX, panelY, panelX, panelY + panelH);
   panelGrad.addColorStop(0, "rgba(4, 30, 66, 0.84)");
@@ -777,6 +944,7 @@ function drawUi() {
   ctx.fillStyle = "#d2f7ff";
   ctx.fillText(`Ресурсы: 🌲 ${state.inventory.wood}   ⚙ ${state.inventory.metal}   ✨ ${state.inventory.artifact}`, 22 * s, 170 * s);
   ctx.fillText(`Апгрейды: ⚡ ${state.ship.speedLevel}   🛡 ${state.ship.hullLevel}   📦 ${state.ship.cargoLevel} | Побегов от кракена: ${state.krakenEscapes}`, 22 * s, 188 * s);
+  ctx.fillText(`Контракт: ${state.mission.targetKind} ${state.mission.delivered}/${state.mission.required} | Скан: ${state.sonarCooldown <= 0 ? "готов" : `${state.sonarCooldown.toFixed(1)}с`}`, 22 * s, 206 * s);
 
   if (state.noteTimer > 0) {
     ctx.fillStyle = "rgba(2, 20, 40, 0.75)";
@@ -832,7 +1000,7 @@ function drawUi() {
   if (state.activeIslandId === "base" && state.mode === "ship") {
     ctx.fillStyle = "#ffe6bf";
     ctx.font = `${Math.round(13 * s)}px sans-serif`;
-    ctx.fillText("База: 1 скорость · 2 корпус · 3 трюм · E ремонт", 582 * s, 204 * s);
+    ctx.fillText("База: 1 скорость · 2 корпус · 3 трюм · E ремонт/контракт · 4 скан", 474 * s, 204 * s);
   }
 
   if (state.hitFlash > 0) {
@@ -855,6 +1023,9 @@ document.addEventListener("keydown", (event) => {
   if (key === "e") {
     triggerPrimaryAction();
   }
+  if (key === "4") {
+    triggerSonarPulse();
+  }
 
   if (key === "1" || key === "2" || key === "3") {
     triggerUpgrade(Number(key));
@@ -868,9 +1039,11 @@ document.addEventListener("keyup", (event) => {
 function bindTouchControl(btn, action) {
   const press = (event) => {
     event.preventDefault();
+    if (btn.disabled) return;
     touchActions.add(action);
     btn.classList.add("is-active");
     if (action === "interact") triggerPrimaryAction();
+    if (action === "sonar") triggerSonarPulse();
     if (action === "upgrade1") triggerUpgrade(1);
     if (action === "upgrade2") triggerUpgrade(2);
     if (action === "upgrade3") triggerUpgrade(3);
@@ -890,9 +1063,61 @@ function bindTouchControl(btn, action) {
   btn.addEventListener("mouseleave", release);
 }
 
+function bindJoystickControl() {
+  if (!joystick || !joystickKnob) return;
+
+  const maxOffset = () => (joystick.clientWidth - joystickKnob.clientWidth) / 2;
+  const reset = () => {
+    joystickState.active = false;
+    joystickState.x = 0;
+    joystickState.y = 0;
+    joystickKnob.style.transform = "translate(-50%, -50%)";
+  };
+
+  const applyPointer = (clientX, clientY) => {
+    const rect = joystick.getBoundingClientRect();
+    const cx = rect.left + rect.width / 2;
+    const cy = rect.top + rect.height / 2;
+    const dx = clientX - cx;
+    const dy = clientY - cy;
+    const limit = maxOffset();
+    const dist = Math.hypot(dx, dy) || 1;
+    const clamped = dist > limit ? limit / dist : 1;
+    const px = dx * clamped;
+    const py = dy * clamped;
+
+    joystickState.active = true;
+    joystickState.x = px / limit;
+    joystickState.y = py / limit;
+    joystickKnob.style.transform = `translate(calc(-50% + ${px}px), calc(-50% + ${py}px))`;
+  };
+
+  const start = (event) => {
+    event.preventDefault();
+    const point = event.touches ? event.touches[0] : event;
+    applyPointer(point.clientX, point.clientY);
+  };
+
+  const move = (event) => {
+    if (!joystickState.active) return;
+    event.preventDefault();
+    const point = event.touches ? event.touches[0] : event;
+    applyPointer(point.clientX, point.clientY);
+  };
+
+  joystick.addEventListener("touchstart", start, { passive: false });
+  joystick.addEventListener("touchmove", move, { passive: false });
+  joystick.addEventListener("touchend", reset, { passive: false });
+  joystick.addEventListener("touchcancel", reset, { passive: false });
+  joystick.addEventListener("mousedown", start);
+  window.addEventListener("mousemove", move);
+  window.addEventListener("mouseup", reset);
+}
+
 for (const btn of actionButtons) {
   bindTouchControl(btn, btn.dataset.action);
 }
+bindJoystickControl();
 
 window.addEventListener("resize", () => {
   updateControlProfileUi();
@@ -901,12 +1126,14 @@ window.addEventListener("resize", () => {
 
 updateControlProfileUi();
 resizeCanvas();
+rollMission();
 
 let previous = performance.now();
 function frame(now) {
   const dt = Math.min(0.033, (now - previous) / 1000);
   previous = now;
   update(dt);
+  updateMobileActionAvailability();
   render();
   requestAnimationFrame(frame);
 }
