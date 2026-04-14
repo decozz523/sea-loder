@@ -3,6 +3,8 @@ const ctx = canvas.getContext("2d");
 const controlProfileBadge = document.getElementById("control-profile-badge");
 const mobileControls = document.getElementById("mobile-controls");
 const actionButtons = mobileControls ? Array.from(mobileControls.querySelectorAll("button")) : [];
+const joystick = document.getElementById("joystick");
+const joystickKnob = document.getElementById("joystick-knob");
 
 const world = {
   width: 14000,
@@ -11,6 +13,7 @@ const world = {
 
 const keys = new Set();
 const touchActions = new Set();
+const joystickState = { active: false, x: 0, y: 0 };
 const resources = [];
 const enemies = [];
 const krakens = [];
@@ -54,6 +57,15 @@ function triggerPrimaryAction() {
 
 function triggerUpgrade(slot) {
   tryUpgrade(slot);
+}
+
+function getUpgradeOption(slot) {
+  const options = {
+    1: { key: "speedLevel", max: 4, w: 8, m: 6, a: 0, name: "Скорость" },
+    2: { key: "hullLevel", max: 4, w: 5, m: 10, a: 0, name: "Прочность" },
+    3: { key: "cargoLevel", max: 4, w: 10, m: 3, a: 1, name: "Трюм" },
+  };
+  return options[slot];
 }
 
 function createIslands() {
@@ -219,14 +231,7 @@ function dockAndRepair() {
 
 function tryUpgrade(slot) {
   if (state.mode !== "ship" || state.activeIslandId !== "base") return;
-
-  const options = {
-    1: { key: "speedLevel", max: 4, w: 8, m: 6, a: 0, name: "Скорость" },
-    2: { key: "hullLevel", max: 4, w: 5, m: 10, a: 0, name: "Прочность" },
-    3: { key: "cargoLevel", max: 4, w: 10, m: 3, a: 1, name: "Трюм" },
-  };
-
-  const up = options[slot];
+  const up = getUpgradeOption(slot);
   if (!up) return;
 
   if (state.ship[up.key] >= up.max) {
@@ -259,6 +264,60 @@ function tryUpgrade(slot) {
   }
 
   setNote(`${up.name} улучшена до ${state.ship[up.key]} ур.`);
+}
+
+function nearestCollectibleDistance() {
+  if (state.mode !== "foot") return Infinity;
+  let best = Infinity;
+  for (const res of resources) {
+    if (res.taken || res.islandId !== state.activeIslandId) continue;
+    const d = Math.hypot(res.x - state.player.x, res.y - state.player.y);
+    if (d < best) best = d;
+  }
+  return best;
+}
+
+function canInteractNow() {
+  if (state.mode === "ship") {
+    const island = getNearIsland(state.ship.x, state.ship.y, 28);
+    return Boolean(island && Math.abs(state.ship.speed) <= 20);
+  }
+
+  const island = islandById(state.activeIslandId);
+  const nearShip = Math.hypot(state.player.x - state.ship.x, state.player.y - state.ship.y) <= island.r + 55;
+  return nearShip || nearestCollectibleDistance() <= 30;
+}
+
+function canUpgradeNow(slot) {
+  if (state.mode !== "ship" || state.activeIslandId !== "base") return false;
+  const up = getUpgradeOption(slot);
+  if (!up) return false;
+  if (state.ship[up.key] >= up.max) return false;
+  const tier = state.ship[up.key] + 1;
+  return (
+    state.inventory.wood >= up.w * tier &&
+    state.inventory.metal >= up.m * tier &&
+    state.inventory.artifact >= up.a * tier
+  );
+}
+
+function updateMobileActionAvailability() {
+  if (!mobileControls) return;
+  for (const button of actionButtons) {
+    const action = button.dataset.action;
+    let enabled = true;
+    if (action === "interact") enabled = canInteractNow();
+    if (action === "upgrade1") enabled = canUpgradeNow(1);
+    if (action === "upgrade2") enabled = canUpgradeNow(2);
+    if (action === "upgrade3") enabled = canUpgradeNow(3);
+
+    button.disabled = !enabled;
+    button.classList.toggle("is-disabled", !enabled);
+    if (!enabled) {
+      touchActions.delete(action);
+      button.classList.remove("is-active");
+    }
+  }
 }
 
 function tryLandOrBoard() {
@@ -418,11 +477,13 @@ function handleShip(dt) {
   const accel = 140;
   const reverse = 78;
   const drag = 0.975;
+  const joyX = joystickState.active ? joystickState.x : 0;
+  const joyY = joystickState.active ? joystickState.y : 0;
 
-  if (hasAction("a") || hasAction("arrowleft") || hasAction("left")) state.ship.angle -= turnRate * dt;
-  if (hasAction("d") || hasAction("arrowright") || hasAction("right")) state.ship.angle += turnRate * dt;
-  if (hasAction("w") || hasAction("arrowup") || hasAction("up")) state.ship.speed += accel * dt;
-  if (hasAction("s") || hasAction("arrowdown") || hasAction("down")) state.ship.speed -= reverse * dt;
+  if (hasAction("a") || hasAction("arrowleft") || joyX < -0.22) state.ship.angle -= turnRate * dt * Math.max(1, Math.abs(joyX));
+  if (hasAction("d") || hasAction("arrowright") || joyX > 0.22) state.ship.angle += turnRate * dt * Math.max(1, Math.abs(joyX));
+  if (hasAction("w") || hasAction("arrowup") || joyY < -0.16) state.ship.speed += accel * dt * Math.max(1, Math.abs(joyY));
+  if (hasAction("s") || hasAction("arrowdown") || joyY > 0.16) state.ship.speed -= reverse * dt * Math.max(1, Math.abs(joyY));
 
   state.ship.speed = Math.max(-60, Math.min(shipMaxSpeed(), state.ship.speed));
   state.ship.speed *= drag;
@@ -460,11 +521,15 @@ function handleFoot(dt) {
   const island = islandById(state.activeIslandId);
   let mx = 0;
   let my = 0;
+  const joyX = joystickState.active ? joystickState.x : 0;
+  const joyY = joystickState.active ? joystickState.y : 0;
 
-  if (hasAction("a") || hasAction("arrowleft") || hasAction("left")) mx -= 1;
-  if (hasAction("d") || hasAction("arrowright") || hasAction("right")) mx += 1;
-  if (hasAction("w") || hasAction("arrowup") || hasAction("up")) my -= 1;
-  if (hasAction("s") || hasAction("arrowdown") || hasAction("down")) my += 1;
+  if (hasAction("a") || hasAction("arrowleft")) mx -= 1;
+  if (hasAction("d") || hasAction("arrowright")) mx += 1;
+  if (hasAction("w") || hasAction("arrowup")) my -= 1;
+  if (hasAction("s") || hasAction("arrowdown")) my += 1;
+  mx += joyX;
+  my += joyY;
 
   const len = Math.hypot(mx, my) || 1;
   mx /= len;
@@ -868,6 +933,7 @@ document.addEventListener("keyup", (event) => {
 function bindTouchControl(btn, action) {
   const press = (event) => {
     event.preventDefault();
+    if (btn.disabled) return;
     touchActions.add(action);
     btn.classList.add("is-active");
     if (action === "interact") triggerPrimaryAction();
@@ -890,9 +956,61 @@ function bindTouchControl(btn, action) {
   btn.addEventListener("mouseleave", release);
 }
 
+function bindJoystickControl() {
+  if (!joystick || !joystickKnob) return;
+
+  const maxOffset = () => (joystick.clientWidth - joystickKnob.clientWidth) / 2;
+  const reset = () => {
+    joystickState.active = false;
+    joystickState.x = 0;
+    joystickState.y = 0;
+    joystickKnob.style.transform = "translate(-50%, -50%)";
+  };
+
+  const applyPointer = (clientX, clientY) => {
+    const rect = joystick.getBoundingClientRect();
+    const cx = rect.left + rect.width / 2;
+    const cy = rect.top + rect.height / 2;
+    const dx = clientX - cx;
+    const dy = clientY - cy;
+    const limit = maxOffset();
+    const dist = Math.hypot(dx, dy) || 1;
+    const clamped = dist > limit ? limit / dist : 1;
+    const px = dx * clamped;
+    const py = dy * clamped;
+
+    joystickState.active = true;
+    joystickState.x = px / limit;
+    joystickState.y = py / limit;
+    joystickKnob.style.transform = `translate(calc(-50% + ${px}px), calc(-50% + ${py}px))`;
+  };
+
+  const start = (event) => {
+    event.preventDefault();
+    const point = event.touches ? event.touches[0] : event;
+    applyPointer(point.clientX, point.clientY);
+  };
+
+  const move = (event) => {
+    if (!joystickState.active) return;
+    event.preventDefault();
+    const point = event.touches ? event.touches[0] : event;
+    applyPointer(point.clientX, point.clientY);
+  };
+
+  joystick.addEventListener("touchstart", start, { passive: false });
+  joystick.addEventListener("touchmove", move, { passive: false });
+  joystick.addEventListener("touchend", reset, { passive: false });
+  joystick.addEventListener("touchcancel", reset, { passive: false });
+  joystick.addEventListener("mousedown", start);
+  window.addEventListener("mousemove", move);
+  window.addEventListener("mouseup", reset);
+}
+
 for (const btn of actionButtons) {
   bindTouchControl(btn, btn.dataset.action);
 }
+bindJoystickControl();
 
 window.addEventListener("resize", () => {
   updateControlProfileUi();
@@ -907,6 +1025,7 @@ function frame(now) {
   const dt = Math.min(0.033, (now - previous) / 1000);
   previous = now;
   update(dt);
+  updateMobileActionAvailability();
   render();
   requestAnimationFrame(frame);
 }
