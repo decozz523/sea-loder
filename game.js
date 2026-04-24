@@ -1,10 +1,7 @@
 const canvas = document.getElementById("game");
 const ctx = canvas.getContext("2d");
 const controlProfileBadge = document.getElementById("control-profile-badge");
-const mobileControls = document.getElementById("mobile-controls");
-const actionButtons = mobileControls ? Array.from(mobileControls.querySelectorAll("button")) : [];
-const joystick = document.getElementById("joystick");
-const joystickKnob = document.getElementById("joystick-knob");
+const actionButtons = Array.from(document.querySelectorAll(".edge-btn"));
 
 const world = {
   width: 14000,
@@ -30,20 +27,17 @@ function isMobileProfile() {
 }
 
 function updateControlProfileUi() {
-  if (!controlProfileBadge || !mobileControls) return;
+  if (!controlProfileBadge) return;
   const mobile = isMobileProfile();
-  controlProfileBadge.textContent = mobile ? "Автонастройка: Телефон" : "Автонастройка: ПК";
-  mobileControls.style.display = mobile ? "flex" : "none";
+  controlProfileBadge.textContent = mobile ? "Профиль: Телефон" : "Профиль: ПК";
 }
 
 function resizeCanvas() {
-  const parentWidth = canvas.parentElement.clientWidth;
-  const maxHeight = Math.min(window.innerHeight * 0.72, parentWidth / canvasRatio);
-  const logicalWidth = Math.max(640, Math.round(maxHeight * canvasRatio));
-  const logicalHeight = Math.round(logicalWidth / canvasRatio);
+  const logicalWidth = Math.max(960, window.innerWidth);
+  const logicalHeight = Math.max(540, window.innerHeight);
   canvas.width = logicalWidth;
   canvas.height = logicalHeight;
-  uiScale = Math.max(0.8, Math.min(1.08, canvas.width / 960));
+  uiScale = Math.max(0.9, Math.min(1.2, canvas.width / 1280));
 }
 
 function hasAction(name) {
@@ -69,54 +63,38 @@ function getUpgradeOption(slot) {
 }
 
 function createIslands() {
-  const generated = [{ id: "base", x: 900, y: 8300, r: 210, type: "base", name: "База" }];
-  const totalIslands = 11;
+  const generated = [{ id: "base", x: 900, y: 8300, r: 220, type: "base", name: "База" }];
+  const totalIslands = 16;
   const typePool = ["resource", "resource", "resource", "enemy", "enemy", "unique"];
+  const chains = [
+    { x: 3000, y: 1700 },
+    { x: 5200, y: 5200 },
+    { x: 8700, y: 2500 },
+    { x: 11300, y: 6900 },
+  ];
 
-  let attempts = 0;
-  while (generated.length < totalIslands && attempts < 1200) {
-    attempts += 1;
-    const r = randomRange(145, 235);
-    const x = randomRange(1200, world.width - 300);
-    const y = randomRange(400, world.height - 300);
-
-    const tooClose = generated.some((island) => Math.hypot(island.x - x, island.y - y) < island.r + r + 480);
-    if (tooClose) continue;
-
-    const type = typePool[Math.floor(Math.random() * typePool.length)];
-    const id = `i${generated.length}`;
-    generated.push({
-      id,
-      x: Math.round(x),
-      y: Math.round(y),
-      r: Math.round(r),
-      type,
-      name: `${type === "unique" ? "Реликт" : type === "enemy" ? "Опасный" : "Дикий"} (${Math.round(x)},${Math.round(y)})`,
-    });
-  }
-
-  if (generated.length < totalIslands) {
-    let fallbackIndex = 0;
-    while (generated.length < totalIslands && fallbackIndex < 600) {
-      fallbackIndex += 1;
-      const r = randomRange(150, 210);
-      const x = 1400 + (fallbackIndex % 8) * ((world.width - 2200) / 7);
-      const y = 600 + Math.floor(fallbackIndex / 8) * 560;
-      if (y > world.height - 350) continue;
-      const tooClose = generated.some((island) => Math.hypot(island.x - x, island.y - y) < island.r + r + 380);
+  for (const chain of chains) {
+    const chainCount = 3 + Math.floor(Math.random() * 2);
+    for (let n = 0; n < chainCount && generated.length < totalIslands; n += 1) {
+      const angle = Math.random() * Math.PI * 2;
+      const spread = randomRange(220, 880);
+      const x = Math.max(600, Math.min(world.width - 380, chain.x + Math.cos(angle) * spread));
+      const y = Math.max(420, Math.min(world.height - 320, chain.y + Math.sin(angle) * spread));
+      const r = randomRange(125, 255);
+      const tooClose = generated.some((island) => Math.hypot(island.x - x, island.y - y) < island.r + r + 220);
       if (tooClose) continue;
       const type = typePool[Math.floor(Math.random() * typePool.length)];
-      const id = `i${generated.length}`;
       generated.push({
-        id,
+        id: `i${generated.length}`,
         x: Math.round(x),
         y: Math.round(y),
         r: Math.round(r),
         type,
-        name: `${type === "unique" ? "Реликт" : type === "enemy" ? "Опасный" : "Дикий"} (${Math.round(x)},${Math.round(y)})`,
+        name: `${type === "unique" ? "Реликт" : type === "enemy" ? "Штормовой" : "Лагуна"} ${generated.length}`,
       });
     }
   }
+
   return generated.slice(0, totalIslands);
 }
 
@@ -181,8 +159,8 @@ const state = {
     metal: 0,
     artifact: 0,
   },
-  note: "Океан и острова генерируются рандомно при каждом запуске.",
-  noteTimer: 6,
+  note: "",
+  noteTimer: 0,
   hitFlash: 0,
   krakenCooldown: 11,
   krakenEscapes: 0,
@@ -392,7 +370,6 @@ function canSonarNow() {
 }
 
 function updateMobileActionAvailability() {
-  if (!mobileControls) return;
   for (const button of actionButtons) {
     const action = button.dataset.action;
     let enabled = true;
@@ -496,17 +473,16 @@ function spawnKraken() {
     vy: randomRange(-25, 25),
     chasing: false,
     life: randomRange(18, 32),
-    escapeMeter: 0,
+    rage: 55,
+    retreating: false,
   });
 
-  setNote("⚠ Кракен замечен! Есть шанс убежать на скорости.", 3.6);
+  setNote("⚠ Кракен рядом.", 1.6);
 }
 
 function updateKrakens(dt) {
-  if (state.mode !== "ship") return;
-
   state.krakenCooldown -= dt;
-  if (state.krakenCooldown <= 0) {
+  if (state.krakenCooldown <= 0 && state.mode === "ship") {
     const spawnChance = 0.18 + Math.min(0.24, state.ship.speed / 250);
     if (Math.random() < spawnChance) spawnKraken();
     state.krakenCooldown = randomRange(20, 40);
@@ -524,37 +500,47 @@ function updateKrakens(dt) {
     const dy = state.ship.y - k.y;
     const d = Math.hypot(dx, dy);
 
-    if (!k.chasing && d < 380) {
+    if (!k.chasing && d < 380 && state.mode === "ship") {
       k.chasing = true;
-      setNote("Кракен атакует корабль! Жми газ и уводи его.", 2.8);
+      k.rage = Math.max(k.rage, 70);
     }
 
-    if (k.chasing) {
+    const inAttackField = state.mode === "ship" && d < 260;
+    if (k.chasing && !k.retreating) {
       k.vx += (dx / (d || 1)) * 95 * dt;
       k.vy += (dy / (d || 1)) * 95 * dt;
 
-      if (d < 110) {
+      if (d < 110 && state.mode === "ship") {
         state.ship.hp -= 24 * dt;
         state.ship.speed *= 0.986;
         state.hitFlash = 1;
       }
 
-      if (d > 280 && state.ship.speed > 95) {
-        k.escapeMeter += dt;
+      if (inAttackField) {
+        k.rage = Math.min(100, k.rage + dt * 9);
       } else {
-        k.escapeMeter = Math.max(0, k.escapeMeter - dt * 0.6);
+        k.rage = Math.max(0, k.rage - dt * 18);
       }
 
-      if (k.escapeMeter > 3.5) {
+      if (state.mode !== "ship") k.rage = Math.max(0, k.rage - dt * 26);
+      if (k.rage <= 0) k.retreating = true;
+    }
+
+    if (k.retreating) {
+      const awayX = k.x - state.ship.x;
+      const awayY = k.y - state.ship.y;
+      const awayD = Math.hypot(awayX, awayY) || 1;
+      k.vx += (awayX / awayD) * 120 * dt;
+      k.vy += (awayY / awayD) * 120 * dt;
+      if (awayD > 1200) {
         krakens.splice(i, 1);
         state.krakenEscapes += 1;
-        setNote("Вы ушли от кракена!", 2.2);
         continue;
       }
     }
 
     const speed = Math.hypot(k.vx, k.vy);
-    const maxSpeed = k.chasing ? 115 : 55;
+    const maxSpeed = k.retreating ? 145 : k.chasing ? 115 : 55;
     if (speed > maxSpeed) {
       k.vx = (k.vx / speed) * maxSpeed;
       k.vy = (k.vy / speed) * maxSpeed;
@@ -601,8 +587,6 @@ function handleShip(dt) {
     state.ship.x = nx;
     state.ship.y = ny;
   }
-
-  updateKrakens(dt);
 
   if (state.ship.hp <= 0) {
     state.ship.hp = state.ship.maxHp;
@@ -685,6 +669,7 @@ function update(dt) {
 
   if (state.mode === "ship") handleShip(dt);
   else handleFoot(dt);
+  updateKrakens(dt);
 }
 
 function cameraOffset() {
@@ -909,8 +894,8 @@ function drawUi() {
   const s = uiScale;
   const panelX = 10 * s;
   const panelY = 10 * s;
-  const panelW = 560 * s;
-  const panelH = 216 * s;
+  const panelW = 390 * s;
+  const panelH = 128 * s;
 
   const panelGrad = ctx.createLinearGradient(panelX, panelY, panelX, panelY + panelH);
   panelGrad.addColorStop(0, "rgba(4, 30, 66, 0.84)");
@@ -923,37 +908,20 @@ function drawUi() {
   const mode = state.mode === "ship" ? "🚢 корабль" : `🧍 пешком (${islandById(state.activeIslandId).name})`;
 
   ctx.fillStyle = "#f1fdff";
-  ctx.font = `bold ${Math.round(16 * s)}px sans-serif`;
-  ctx.fillText(`Режим: ${mode}`, 22 * s, 34 * s);
-
-  ctx.font = `${Math.round(14 * s)}px sans-serif`;
-  ctx.fillStyle = "#dcf8ff";
-  ctx.fillText(`Координаты корабля: X ${Math.round(state.ship.x)} | Y ${Math.round(state.ship.y)}`, 22 * s, 56 * s);
-  ctx.fillText(`Скорость: ${Math.abs(state.ship.speed).toFixed(1)} узл.`, 22 * s, 76 * s);
-
-  drawBar(22 * s, 88 * s, 240 * s, 14 * s, state.ship.hp / state.ship.maxHp, "#ff7e6f");
-  drawBar(22 * s, 112 * s, 240 * s, 14 * s, state.player.hp / state.player.maxHp, "#8de36b");
-  drawBar(22 * s, 136 * s, 240 * s, 14 * s, cargoUsed() / cargoMax(), "#ffd56b");
-
-  ctx.fillStyle = "#f6f9ff";
+  ctx.font = `bold ${Math.round(14 * s)}px sans-serif`;
+  ctx.fillText(`${mode}`, 22 * s, 30 * s);
   ctx.font = `${Math.round(12 * s)}px sans-serif`;
-  ctx.fillText(`Корабль HP ${state.ship.hp.toFixed(0)}/${state.ship.maxHp}`, 270 * s, 99 * s);
-  ctx.fillText(`Персонаж HP ${state.player.hp.toFixed(0)}/${state.player.maxHp}`, 270 * s, 123 * s);
-  ctx.fillText(`Трюм ${cargoUsed()}/${cargoMax()} | Кракены рядом: ${krakens.length}`, 270 * s, 147 * s);
+  ctx.fillStyle = "#dcf8ff";
+  ctx.fillText(`HP корабля`, 22 * s, 50 * s);
+  drawBar(22 * s, 56 * s, 160 * s, 12 * s, state.ship.hp / state.ship.maxHp, "#ff7e6f");
+  ctx.fillText(`Трюм ${cargoUsed()}/${cargoMax()}`, 205 * s, 66 * s);
+  ctx.fillText(`🌲${state.inventory.wood} ⚙${state.inventory.metal} ✨${state.inventory.artifact}`, 22 * s, 88 * s);
+  ctx.fillText(`Апгрейды ${state.ship.speedLevel}/${state.ship.hullLevel}/${state.ship.cargoLevel}`, 22 * s, 108 * s);
 
-  ctx.fillStyle = "#d2f7ff";
-  ctx.fillText(`Ресурсы: 🌲 ${state.inventory.wood}   ⚙ ${state.inventory.metal}   ✨ ${state.inventory.artifact}`, 22 * s, 170 * s);
-  ctx.fillText(`Апгрейды: ⚡ ${state.ship.speedLevel}   🛡 ${state.ship.hullLevel}   📦 ${state.ship.cargoLevel} | Побегов от кракена: ${state.krakenEscapes}`, 22 * s, 188 * s);
-  ctx.fillText(`Контракт: ${state.mission.targetKind} ${state.mission.delivered}/${state.mission.required} | Скан: ${state.sonarCooldown <= 0 ? "готов" : `${state.sonarCooldown.toFixed(1)}с`}`, 22 * s, 206 * s);
-
-  if (state.noteTimer > 0) {
-    ctx.fillStyle = "rgba(2, 20, 40, 0.75)";
-    ctx.fillRect(170 * s, canvas.height - 48 * s, 620 * s, 34 * s);
-    ctx.strokeStyle = "rgba(124, 218, 255, 0.8)";
-    ctx.strokeRect(170 * s, canvas.height - 48 * s, 620 * s, 34 * s);
-    ctx.fillStyle = "#f7fdff";
-    ctx.font = `${Math.round(14 * s)}px sans-serif`;
-    ctx.fillText(state.note, 184 * s, canvas.height - 26 * s);
+  const activeKraken = krakens.find((k) => k.chasing && !k.retreating);
+  if (activeKraken) {
+    ctx.fillText("Ярость кракена", 205 * s, 88 * s);
+    drawBar(205 * s, 94 * s, 170 * s, 12 * s, activeKraken.rage / 100, "#ff6ac8");
   }
 
   const chartW = 280 * s;
@@ -969,9 +937,9 @@ function drawUi() {
   ctx.strokeStyle = "#79ddff";
   ctx.strokeRect(chartX, chartY, chartW, chartH);
 
-  ctx.fillStyle = "#d5f3ff";
+  ctx.fillStyle = "#ecfbff";
   ctx.font = `${Math.round(12 * s)}px sans-serif`;
-  ctx.fillText("🧭 Навигационная карта (только открытое)", chartX + 8 * s, chartY + 16 * s);
+  ctx.fillText("🧭 Карта", chartX + 8 * s, chartY + 16 * s);
 
   for (let gx = 0; gx <= 4; gx += 1) {
     const x = chartX + (gx / 4) * chartW;
@@ -996,12 +964,6 @@ function drawUi() {
   ctx.beginPath();
   ctx.arc(chartX + (state.ship.x / world.width) * chartW, chartY + (state.ship.y / world.height) * chartH, 3.5 * s, 0, Math.PI * 2);
   ctx.fill();
-
-  if (state.activeIslandId === "base" && state.mode === "ship") {
-    ctx.fillStyle = "#ffe6bf";
-    ctx.font = `${Math.round(13 * s)}px sans-serif`;
-    ctx.fillText("База: 1 скорость · 2 корпус · 3 трюм · E ремонт/контракт · 4 скан", 474 * s, 204 * s);
-  }
 
   if (state.hitFlash > 0) {
     ctx.fillStyle = `rgba(255,70,70,${0.22 * state.hitFlash})`;
@@ -1063,61 +1025,9 @@ function bindTouchControl(btn, action) {
   btn.addEventListener("mouseleave", release);
 }
 
-function bindJoystickControl() {
-  if (!joystick || !joystickKnob) return;
-
-  const maxOffset = () => (joystick.clientWidth - joystickKnob.clientWidth) / 2;
-  const reset = () => {
-    joystickState.active = false;
-    joystickState.x = 0;
-    joystickState.y = 0;
-    joystickKnob.style.transform = "translate(-50%, -50%)";
-  };
-
-  const applyPointer = (clientX, clientY) => {
-    const rect = joystick.getBoundingClientRect();
-    const cx = rect.left + rect.width / 2;
-    const cy = rect.top + rect.height / 2;
-    const dx = clientX - cx;
-    const dy = clientY - cy;
-    const limit = maxOffset();
-    const dist = Math.hypot(dx, dy) || 1;
-    const clamped = dist > limit ? limit / dist : 1;
-    const px = dx * clamped;
-    const py = dy * clamped;
-
-    joystickState.active = true;
-    joystickState.x = px / limit;
-    joystickState.y = py / limit;
-    joystickKnob.style.transform = `translate(calc(-50% + ${px}px), calc(-50% + ${py}px))`;
-  };
-
-  const start = (event) => {
-    event.preventDefault();
-    const point = event.touches ? event.touches[0] : event;
-    applyPointer(point.clientX, point.clientY);
-  };
-
-  const move = (event) => {
-    if (!joystickState.active) return;
-    event.preventDefault();
-    const point = event.touches ? event.touches[0] : event;
-    applyPointer(point.clientX, point.clientY);
-  };
-
-  joystick.addEventListener("touchstart", start, { passive: false });
-  joystick.addEventListener("touchmove", move, { passive: false });
-  joystick.addEventListener("touchend", reset, { passive: false });
-  joystick.addEventListener("touchcancel", reset, { passive: false });
-  joystick.addEventListener("mousedown", start);
-  window.addEventListener("mousemove", move);
-  window.addEventListener("mouseup", reset);
-}
-
 for (const btn of actionButtons) {
   bindTouchControl(btn, btn.dataset.action);
 }
-bindJoystickControl();
 
 window.addEventListener("resize", () => {
   updateControlProfileUi();

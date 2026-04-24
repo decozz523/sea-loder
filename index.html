@@ -3,61 +3,34 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Sea Loder — исследование островов</title>
+    <title>Sea Loder 2.0</title>
     <link rel="stylesheet" href="styles.css" />
   </head>
   <body>
-    <main class="layout">
-      <header class="hero">
-        <div>
-          <h1>Sea Loder</h1>
-          <p class="hero-description">
-            Путешествуй по океану, открывай случайно сгенерированные острова, высаживайся за ресурсами
-            и прокачивай корабль на базе. Берегись кракенов: они могут сломать корабль, но от них можно уйти.
-          </p>
+    <main class="game-screen">
+      <canvas id="game" width="1280" height="720" aria-label="Sea Loder 2.0"></canvas>
+
+      <div class="hud-top">
+        <span class="logo">Sea Loder 2.0</span>
+        <span id="control-profile-badge">Профиль: ПК</span>
+      </div>
+
+      <div class="edge-controls edge-controls-left" aria-label="Кнопки движения">
+        <button class="edge-btn" data-action="w">▲</button>
+        <div class="edge-row">
+          <button class="edge-btn" data-action="a">◀</button>
+          <button class="edge-btn" data-action="s">▼</button>
+          <button class="edge-btn" data-action="d">▶</button>
         </div>
-        <div class="badges">
-          <span>Open Sea</span>
-          <span>Discovery Fog</span>
-          <span>Kraken Encounters</span>
-          <span id="control-profile-badge">Автонастройка: ПК</span>
-        </div>
-      </header>
+      </div>
 
-      <section class="game-shell">
-        <aside class="help-panel">
-          <h2>Управление</h2>
-          <p class="help-note">
-            Игра сама переключает профиль управления: клавиатура на ПК и экранные кнопки на телефоне.
-          </p>
-          <ul>
-            <li><strong>W/S</strong> — ход корабля</li>
-            <li><strong>A/D</strong> — поворот</li>
-            <li><strong>E</strong> — высадка / сбор / док</li>
-            <li><strong>1/2/3</strong> — улучшения на базе</li>
-            <li><strong>WASD</strong> — движение пешком</li>
-          </ul>
-        </aside>
-
-        <section class="game-wrap">
-          <canvas id="game" width="960" height="540" aria-label="Игра про корабль и острова"></canvas>
-
-          <div class="mobile-controls" id="mobile-controls" aria-label="Экранные кнопки управления">
-            <div class="move-pad">
-              <div class="joystick" id="joystick" aria-label="Виртуальный джойстик движения">
-                <div class="joystick-knob" id="joystick-knob"></div>
-              </div>
-            </div>
-            <div class="action-pad">
-              <button data-action="interact">E / Действие</button>
-              <button data-action="sonar">Скан 🔎</button>
-              <button data-action="upgrade1">1 ⚡</button>
-              <button data-action="upgrade2">2 🛡</button>
-              <button data-action="upgrade3">3 📦</button>
-            </div>
-          </div>
-        </section>
-      </section>
+      <div class="edge-controls edge-controls-right" aria-label="Кнопки действий">
+        <button class="edge-btn" data-action="interact">E</button>
+        <button class="edge-btn" data-action="sonar">СКАН</button>
+        <button class="edge-btn" data-action="upgrade1">1</button>
+        <button class="edge-btn" data-action="upgrade2">2</button>
+        <button class="edge-btn" data-action="upgrade3">3</button>
+      </div>
     </main>
     <script src="game.js"></script>
   </body>
